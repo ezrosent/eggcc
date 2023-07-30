@@ -7,16 +7,26 @@
 //! native Bril representation to RVSDGs requires the following steps:
 //!
 //! * Parse to CFG: read the bril program into a graph data-structure where
-//! basic blocks are nodes and edges are (conditional) jumps.
+//! basic blocks are nodes and edges are jumps.
 //!
 //! * Restructure the CFG: Bril programs support irreducible CFGs, but the CFGs
 //! corresponding to RVSDGs are all reducible. Before we convert the CFG to an
-//! RVSDG, we need to convert the unstructured CFG to a structured one.
+//! RVSDG, we must convert the unstructured CFG to a structured one.
 //!
-//! * RVSDG conversion: Once we have a structured CFG we need to convert the
+//! * RVSDG conversion: Once we have a structured CFG we can convert the
 //! program (still written in terms of gotos) to the structured format for
 //! RVSDGs. Part of this conversion process is the discovery of what the
 //! "inputs" and "outputs" are for different RVSDG nodes.
+//!
+//! # References
+//!
+//! * ["RVSDG: An Intermediate Representation for Optimizing Compilers"](https://arxiv.org/abs/1912.05036)
+//! by Reissmann, Meyer, Bahmann, and Själander
+//! * ["Perfect Reconstructability of Control Flow from Demand Dependence Graphs"](https://dl.acm.org/doi/10.1145/2693261)
+//! by Bahmann, Reissmann,  Jahre, and Meyer
+//!
+//! In addition to those papers, the Jamey Sharp's
+//! [optir](https://github.com/jameysharp/optir) project is a major inspiration.
 pub(crate) mod cfg;
 
 #[cfg(test)]
