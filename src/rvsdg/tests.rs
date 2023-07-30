@@ -86,3 +86,11 @@ cfg_test!(
         "next.ret.1" = (RetVal { arg: "icount".into() }) => EXIT,
     ]
 );
+
+cfg_test!(
+    implicit_return,
+    include_str!("../../data/implicit-return.bril"),
+    [
+        ENTRY = (Jmp) => EXIT,
+    ]
+);

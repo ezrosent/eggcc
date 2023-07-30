@@ -1,4 +1,8 @@
 //! Parse a bril program into a CFG.
+//!
+//! The methods here largely ignore the instructions in the program: all that we
+//! look for here are instructions that may break up basic blocks (`jmp`, `br`,
+//! `ret`), and labels. All other instructions are copied into the CFG.
 use std::collections::HashMap;
 use std::mem;
 
@@ -30,10 +34,13 @@ impl BasicBlock {
 
 /// A branch in the CFG.
 pub(crate) struct Branch {
+    /// The type of branch.
     pub(crate) op: BranchOp,
+    /// The position of the branch in the original program.
     pub(crate) pos: Option<Position>,
 }
 
+/// The types of branch.
 #[derive(PartialEq, Eq)]
 pub(crate) enum BranchOp {
     /// An unconditional branch to a block.
@@ -44,76 +51,16 @@ pub(crate) enum BranchOp {
     RetVal { arg: String },
 }
 
+/// The control-flow graph for a single function.
 pub(crate) struct Cfg {
+    /// The arguments to the function.
     pub(crate) args: Vec<Argument>,
+    /// The graph itself.
     pub(crate) graph: Graph<BasicBlock, Branch>,
+    /// The entry node for the CFG.
     pub(crate) entry: NodeIndex,
+    /// The (single) exit node for the CFG.
     pub(crate) exit: NodeIndex,
-}
-
-struct CfgBuilder {
-    cfg: Cfg,
-    label_to_block: HashMap<String, NodeIndex>,
-}
-
-impl CfgBuilder {
-    fn new(func: &Function) -> CfgBuilder {
-        let mut graph = Graph::default();
-        let entry = graph.add_node(BasicBlock::empty(BlockName::Entry));
-        let exit = graph.add_node(BasicBlock::empty(BlockName::Exit));
-        CfgBuilder {
-            cfg: Cfg {
-                args: func.args.clone(),
-                graph,
-                entry,
-                exit,
-            },
-            label_to_block: HashMap::new(),
-        }
-    }
-    fn build(mut self) -> Cfg {
-        // If there are no outgoing edges from the entry block, add a basic one returning to the exit.
-        if self
-            .cfg
-            .graph
-            .neighbors_directed(self.cfg.entry, petgraph::Outgoing)
-            .next()
-            .is_none()
-        {
-            self.cfg.graph.add_edge(
-                self.cfg.entry,
-                self.cfg.exit,
-                Branch {
-                    op: BranchOp::Jmp,
-                    pos: None,
-                },
-            );
-        }
-        self.cfg
-    }
-    fn get_index(&mut self, label: &str) -> NodeIndex {
-        *self
-            .label_to_block
-            .entry(label.to_string())
-            .or_insert_with(|| {
-                self.cfg
-                    .graph
-                    .add_node(BasicBlock::empty(BlockName::Named(label.into())))
-            })
-    }
-    fn finish_block(&mut self, index: NodeIndex, block: Vec<Instruction>) {
-        let BasicBlock { instrs, .. } = self.cfg.graph.node_weight_mut(index).unwrap();
-        debug_assert!(instrs.is_empty());
-        *instrs = block;
-    }
-
-    fn set_pos(&mut self, index: NodeIndex, pos: Option<Position>) {
-        self.cfg.graph.node_weight_mut(index).unwrap().pos = pos;
-    }
-
-    fn add_edge(&mut self, src: NodeIndex, dst: NodeIndex, branch: Branch) {
-        self.cfg.graph.add_edge(src, dst, branch);
-    }
 }
 
 /// Get the underyling CFG corresponding to the function `func`.
@@ -236,4 +183,69 @@ pub(crate) fn to_cfg(func: &Function) -> Cfg {
     }
     builder.finish_block(current, mem::take(&mut block));
     builder.build()
+}
+
+struct CfgBuilder {
+    cfg: Cfg,
+    label_to_block: HashMap<String, NodeIndex>,
+}
+
+impl CfgBuilder {
+    fn new(func: &Function) -> CfgBuilder {
+        let mut graph = Graph::default();
+        let entry = graph.add_node(BasicBlock::empty(BlockName::Entry));
+        let exit = graph.add_node(BasicBlock::empty(BlockName::Exit));
+        CfgBuilder {
+            cfg: Cfg {
+                args: func.args.clone(),
+                graph,
+                entry,
+                exit,
+            },
+            label_to_block: HashMap::new(),
+        }
+    }
+    fn build(mut self) -> Cfg {
+        // If there are no outgoing edges from the entry block, add a basic one returning to the exit.
+        if self
+            .cfg
+            .graph
+            .neighbors_directed(self.cfg.entry, petgraph::Outgoing)
+            .next()
+            .is_none()
+        {
+            self.cfg.graph.add_edge(
+                self.cfg.entry,
+                self.cfg.exit,
+                Branch {
+                    op: BranchOp::Jmp,
+                    pos: None,
+                },
+            );
+        }
+        self.cfg
+    }
+    fn get_index(&mut self, label: &str) -> NodeIndex {
+        *self
+            .label_to_block
+            .entry(label.to_string())
+            .or_insert_with(|| {
+                self.cfg
+                    .graph
+                    .add_node(BasicBlock::empty(BlockName::Named(label.into())))
+            })
+    }
+    fn finish_block(&mut self, index: NodeIndex, block: Vec<Instruction>) {
+        let BasicBlock { instrs, .. } = self.cfg.graph.node_weight_mut(index).unwrap();
+        debug_assert!(instrs.is_empty());
+        *instrs = block;
+    }
+
+    fn set_pos(&mut self, index: NodeIndex, pos: Option<Position>) {
+        self.cfg.graph.node_weight_mut(index).unwrap().pos = pos;
+    }
+
+    fn add_edge(&mut self, src: NodeIndex, dst: NodeIndex, branch: Branch) {
+        self.cfg.graph.add_edge(src, dst, branch);
+    }
 }

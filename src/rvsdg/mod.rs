@@ -1,3 +1,4 @@
+#![allow(dead_code)] // TODO: remove this once wired in
 //! Convert bril programs to RVSDGs.
 //!
 //! Bril functions are written in terms of basic blocks and jumps/gotos. RVSDGs
