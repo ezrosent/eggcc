@@ -28,6 +28,7 @@
 //! In addition to those papers, the Jamey Sharp's
 //! [optir](https://github.com/jameysharp/optir) project is a major inspiration.
 pub(crate) mod cfg;
+pub(crate) mod restructure;
 
 #[cfg(test)]
 mod tests;
