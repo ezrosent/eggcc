@@ -7,7 +7,8 @@
 //! native Bril representation to RVSDGs requires the following steps:
 //!
 //! * Parse to CFG: read the bril program into a graph data-structure where
-//! basic blocks are nodes and edges are jumps.
+//! basic blocks are nodes and edges are jumps. (This happens in the `cfg`
+//! module).
 //!
 //! * Restructure the CFG: Bril programs support irreducible CFGs, but the CFGs
 //! corresponding to RVSDGs are all reducible. Before we convert the CFG to an
@@ -27,11 +28,7 @@
 //!
 //! In addition to those papers, the Jamey Sharp's
 //! [optir](https://github.com/jameysharp/optir) project is a major inspiration.
-pub(crate) mod cfg;
 pub(crate) mod restructure;
-
-#[cfg(test)]
-mod tests;
 
 use thiserror::Error;
 

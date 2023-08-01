@@ -1,6 +1,6 @@
 //! Convert a potentially irreducible CFG to a reducible one.
 
-use super::cfg::Cfg;
+use crate::cfg::Cfg;
 
 impl Cfg {
     fn restructure_loops(&mut self) {
