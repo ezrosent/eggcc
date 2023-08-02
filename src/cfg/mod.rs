@@ -36,6 +36,25 @@ impl BasicBlock {
     }
 }
 
+/// An number (`val`) between 0 and `of` (exclusive).
+///
+/// These are used to represent "switch" blocks in the CFG.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct CondVal {
+    pub(crate) val: u32,
+    pub(crate) of: u32,
+}
+
+impl From<bool> for CondVal {
+    fn from(value: bool) -> Self {
+        if value {
+            CondVal { val: 1, of: 2 }
+        } else {
+            CondVal { val: 0, of: 2 }
+        }
+    }
+}
+
 /// A branch in the CFG.
 pub(crate) struct Branch {
     /// The type of branch.
@@ -50,7 +69,7 @@ pub(crate) enum BranchOp {
     /// An unconditional branch to a block.
     Jmp,
     /// A conditional branch to a block.
-    Cond { arg: String, val: bool },
+    Cond { arg: String, val: CondVal },
     /// A return statement carrying a value.
     RetVal { arg: String },
 }
@@ -114,7 +133,7 @@ pub(crate) fn to_cfg(func: &Function) -> Cfg {
                     Branch {
                         op: BranchOp::Cond {
                             arg: arg.clone(),
-                            val: true,
+                            val: true.into(),
                         },
                         pos: pos.clone(),
                     },
@@ -125,7 +144,7 @@ pub(crate) fn to_cfg(func: &Function) -> Cfg {
                     Branch {
                         op: BranchOp::Cond {
                             arg: arg.clone(),
-                            val: false,
+                            val: false.into(),
                         },
                         pos: pos.clone(),
                     },
