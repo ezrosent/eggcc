@@ -32,8 +32,15 @@ pub(crate) mod restructure;
 
 use thiserror::Error;
 
+use crate::cfg::Identifier;
+
 /// Errors from the rvsdg module.
 #[derive(Debug, Error)]
 pub(crate) enum RvsdgError {}
 
 pub(crate) type Result<T = ()> = std::result::Result<T, RvsdgError>;
+
+#[derive(Debug)]
+pub(crate) enum Annotation {
+    AssignCond { dst: Identifier, cond: u32 },
+}

@@ -4,32 +4,50 @@
 //! The methods here largely ignore the instructions in the program: all that we
 //! look for here are instructions that may break up basic blocks (`jmp`, `br`,
 //! `ret`), and labels. All other instructions are copied into the CFG.
-use std::collections::HashMap;
 use std::mem;
 
 use bril_rs::{Argument, Code, EffectOps, Function, Instruction, Position};
-use petgraph::{graph::NodeIndex, Graph};
+use hashbrown::HashMap;
+use petgraph::{graph::NodeIndex, stable_graph::StableDiGraph};
+
+use crate::rvsdg::Annotation;
 
 #[cfg(test)]
 mod tests;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Identifier {
+    Name(Box<str>),
+    Num(usize),
+}
+
+impl<T: AsRef<str>> From<T> for Identifier {
+    fn from(value: T) -> Identifier {
+        Identifier::Name(value.as_ref().into())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum BlockName {
     Entry,
     Exit,
+    Placeholder(usize),
     Named(String),
 }
 
+#[derive(Debug)]
 pub(crate) struct BasicBlock {
     pub(crate) instrs: Vec<Instruction>,
+    pub(crate) footer: Vec<Annotation>,
     pub(crate) name: BlockName,
     pub(crate) pos: Option<Position>,
 }
 
 impl BasicBlock {
-    fn empty(name: BlockName) -> BasicBlock {
+    pub(crate) fn empty(name: BlockName) -> BasicBlock {
         BasicBlock {
             instrs: Default::default(),
+            footer: Default::default(),
             name,
             pos: None,
         }
@@ -56,6 +74,7 @@ impl From<bool> for CondVal {
 }
 
 /// A branch in the CFG.
+#[derive(Debug)]
 pub(crate) struct Branch {
     /// The type of branch.
     pub(crate) op: BranchOp,
@@ -64,12 +83,12 @@ pub(crate) struct Branch {
 }
 
 /// The types of branch.
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub(crate) enum BranchOp {
     /// An unconditional branch to a block.
     Jmp,
     /// A conditional branch to a block.
-    Cond { arg: String, val: CondVal },
+    Cond { arg: Identifier, val: CondVal },
     /// A return statement carrying a value.
     RetVal { arg: String },
 }
@@ -79,7 +98,7 @@ pub(crate) struct Cfg {
     /// The arguments to the function.
     pub(crate) args: Vec<Argument>,
     /// The graph itself.
-    pub(crate) graph: Graph<BasicBlock, Branch>,
+    pub(crate) graph: StableDiGraph<BasicBlock, Branch>,
     /// The entry node for the CFG.
     pub(crate) entry: NodeIndex,
     /// The (single) exit node for the CFG.
@@ -132,7 +151,7 @@ pub(crate) fn to_cfg(func: &Function) -> Cfg {
                     true_block,
                     Branch {
                         op: BranchOp::Cond {
-                            arg: arg.clone(),
+                            arg: arg.into(),
                             val: true.into(),
                         },
                         pos: pos.clone(),
@@ -143,7 +162,7 @@ pub(crate) fn to_cfg(func: &Function) -> Cfg {
                     false_block,
                     Branch {
                         op: BranchOp::Cond {
-                            arg: arg.clone(),
+                            arg: arg.into(),
                             val: false.into(),
                         },
                         pos: pos.clone(),
@@ -215,7 +234,7 @@ struct CfgBuilder {
 
 impl CfgBuilder {
     fn new(func: &Function) -> CfgBuilder {
-        let mut graph = Graph::default();
+        let mut graph = StableDiGraph::default();
         let entry = graph.add_node(BasicBlock::empty(BlockName::Entry));
         let exit = graph.add_node(BasicBlock::empty(BlockName::Exit));
         CfgBuilder {

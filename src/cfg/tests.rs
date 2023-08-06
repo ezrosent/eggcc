@@ -1,7 +1,7 @@
 use crate::cfg::{to_cfg, BlockName};
 use bril2json::parse_abstract_program_from_read;
 use bril_rs::{load_program_from_read, Program};
-use petgraph::graph::NodeIndex;
+use petgraph::dot::Dot;
 
 fn parse_from_string(input: &str) -> Program {
     let abs_program = parse_abstract_program_from_read(input.as_bytes(), true, false, None);
@@ -38,9 +38,10 @@ macro_rules! cfg_test {
                 mentioned.insert(to_block!($src));
                 mentioned.insert(to_block!($dst));
             )*
-            for (i, node) in cfg.graph.raw_nodes().iter().enumerate() {
-                assert!(mentioned.contains(&node.weight.name), "description does not mention block {:?}", node.weight.name);
-                block.insert(node.weight.name.clone(), NodeIndex::new(i));
+            for i in cfg.graph.node_indices() {
+                let node = cfg.graph.node_weight(i).unwrap();
+                assert!(mentioned.contains(&node.name), "description does not mention block {:?}", node.name);
+                block.insert(node.name.clone(), i);
             }
             $({
                 let src_name = to_block!($src);
@@ -92,3 +93,11 @@ cfg_test!(
         ENTRY = (Jmp) => EXIT,
     ]
 );
+
+#[test]
+fn restructure_basic() {
+    let prog = parse_from_string(include_str!("../../data/unstructured.bril"));
+    let mut cfg = to_cfg(&prog.functions[0]);
+    cfg.restructure();
+    eprintln!("{:#?}", Dot::new(&cfg.graph));
+}
