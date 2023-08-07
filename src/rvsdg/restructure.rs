@@ -1,11 +1,11 @@
 //! Convert a potentially irreducible CFG to a reducible one.
 
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use petgraph::{
     algo::{dominators, tarjan_scc},
     graph::NodeIndex,
     stable_graph::{EdgeIndex, StableDiGraph},
-    visit::{NodeFiltered, VisitMap, Visitable},
+    visit::{EdgeRef, NodeFiltered, VisitMap, Visitable},
     Direction,
 };
 
@@ -62,9 +62,8 @@ impl Cfg {
         self.graph.node_indices().for_each(|node| {
             all.visit(node);
         });
-        self.restructure_inner(&all, &mut state);
-        let please_uncomment = 1;
-        // self.restructure_branches(&mut state);
+        self.restructure_loops(&all, &mut state);
+        self.restructure_branches(&mut state);
     }
 
     fn branch_if(
@@ -87,160 +86,234 @@ impl Cfg {
         )
     }
 
-    fn restructure_inner(&mut self, filter: &NodeSet, state: &mut RestructureState) {
-        // TODO: pool allocations for filters and node vectors
+    fn rewrite_arcs(
+        &mut self,
+        arcs: impl Iterator<Item = EdgeIndex>,
+        mut annotate: impl FnMut(NodeIndex, &mut Vec<Annotation>) -> NodeIndex,
+    ) {
+        for edge_id in arcs {
+            let (src, target) = self.graph.edge_endpoints(edge_id).unwrap();
+            let branch = self.graph.remove_edge(edge_id).unwrap();
+            match &branch.op {
+                BranchOp::Jmp
+                | BranchOp::Cond {
+                    val: CondVal { val: 0, of: 1 },
+                    ..
+                } => {
+                    // For unconditional jumps, simply annotate the
+                    // source block and reroute the edge
+                    let new_target = annotate(target, &mut self.graph[src].footer);
+                    self.graph.add_edge(src, new_target, branch);
+                }
+                BranchOp::Cond { .. } => {
+                    // For conditional jumps, create a new node and
+                    // route flow through it before jumping to the entry
+                    // node.
+                    let intermediate = self.fresh_block();
+                    let new_target = annotate(target, &mut self.graph[intermediate].footer);
+                    self.graph.add_edge(src, intermediate, branch);
+                    self.graph.add_edge(intermediate, new_target, JMP);
+                }
+                BranchOp::RetVal { .. } => panic!("unexpected return edge"),
+            }
+        }
+    }
+
+    fn restructure_loops(&mut self, filter: &NodeSet, state: &mut RestructureState) {
         let base = NodeFiltered::from_fn(&self.graph, |node| filter.is_visited(&node));
         let sccs = tarjan_scc(&base);
-        let please_remove = 1;
-        eprintln!(
-            "sccs={:?}",
-            sccs.iter()
-                .map(|x| x
-                    .iter()
-                    .map(|node| self.graph[*node].name.clone())
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>()
-        );
-
         for scc in sccs {
             if scc.len() < 2 {
-                let please_remove = 1;
-                eprintln!("skipping {scc:?}");
-                // Either a single block or a simple loop.
+                // Any SCC with this few nodes must be structured.
                 continue;
             }
 
-            let please_remove = 1;
-            eprintln!("not skipping {scc:?}");
+            // The following follows the paper fairly literally.
 
-            let in_scc = node_set(scc.iter().copied());
-            // Entry nodes are those from outside the SCC pointing in.
-            let entry_nodes = node_set(scc.iter().copied().flat_map(|node| {
-                self.graph
-                    .neighbors_directed(node, petgraph::Incoming)
-                    .filter(|neighbor| !in_scc.is_visited(neighbor))
-            }));
+            let scc_set = node_set(scc.iter().copied());
+            let mut entry_arcs = HashSet::new();
+            let mut entry_vertices = HashSet::new();
+            for edge_ref in scc
+                .iter()
+                .flat_map(|node| self.graph.edges_directed(*node, Direction::Incoming))
+                .filter(|e| !scc_set.is_visited(&e.source()))
+            {
+                entry_arcs.insert(edge_ref.id());
+                entry_vertices.insert(edge_ref.target());
+            }
 
-            let entry_targets = node_set(entry_nodes.ones().map(NodeIndex::new).flat_map(|node| {
-                self.graph
-                    .neighbors_directed(node, petgraph::Outgoing)
-                    .filter(|neighbor| in_scc.is_visited(neighbor))
-            }));
+            let mut exit_arcs = HashSet::new();
+            let mut exit_vertices = HashSet::new();
 
-            let self_loops = node_set(entry_nodes.ones().map(NodeIndex::new).flat_map(|node| {
-                self.graph
-                    .neighbors_directed(node, petgraph::Incoming)
-                    .filter(|neighbor| in_scc.is_visited(neighbor))
-            }));
+            for edge_ref in scc
+                .iter()
+                .flat_map(|node| self.graph.edges_directed(*node, Direction::Outgoing))
+                .filter(|e| !scc_set.is_visited(&e.target()))
+            {
+                exit_arcs.insert(edge_ref.id());
+                exit_vertices.insert(edge_ref.target());
+            }
 
-            let exit_nodes = node_set(scc.iter().copied().flat_map(|node| {
-                self.graph
-                    .neighbors_directed(node, petgraph::Outgoing)
-                    .filter(|neighbor| !in_scc.is_visited(neighbor))
-            }));
+            let repetition_arcs: HashSet<EdgeIndex> = entry_vertices
+                .iter()
+                .flat_map(|node| self.graph.edges_directed(*node, Direction::Incoming))
+                .filter(|e| scc_set.is_visited(&e.source()))
+                .map(|e| e.id())
+                .collect();
 
-            let n_entries = entry_nodes.count_ones(..);
-            let n_exits = exit_nodes.count_ones(..);
-
-            let please_remove = 1;
-            eprintln!("entries={n_entries}, exits={n_exits}");
-
-            // if n_entries == 1 && n_exits == 1 {
-            //     continue;
-            // }
-
-            self_loops
-                .ones()
-                .chain(entry_nodes.ones())
-                .map(NodeIndex::new)
-                .for_each(|x| self.split_edges(x));
-            let please_sort_this_out = 1;
-            // DUPLICATION DUPLICATION
-            // Entry nodes are those from outside the SCC pointing in.
-            let entry_nodes = node_set(scc.iter().copied().flat_map(|node| {
-                self.graph
-                    .neighbors_directed(node, petgraph::Incoming)
-                    .filter(|neighbor| !in_scc.is_visited(neighbor))
-            }));
-
-            let entry_targets = node_set(entry_nodes.ones().map(NodeIndex::new).flat_map(|node| {
-                self.graph
-                    .neighbors_directed(node, petgraph::Outgoing)
-                    .filter(|neighbor| in_scc.is_visited(neighbor))
-            }));
-
-            let self_loops = node_set(entry_nodes.ones().map(NodeIndex::new).flat_map(|node| {
-                self.graph
-                    .neighbors_directed(node, petgraph::Incoming)
-                    .filter(|neighbor| in_scc.is_visited(neighbor))
-            }));
-            let n_entries = entry_nodes.count_ones(..);
-            let n_exits = exit_nodes.count_ones(..);
-
-            let rep = state.fresh();
-
-            assert!(n_entries < u32::MAX as usize);
-
-            let footer = self.fresh_block();
-
-            let exit = self.fresh_block();
-            let entry = if entry_targets.count_ones(..) == 1 {
-                NodeIndex::new(entry_nodes.ones().next().unwrap())
+            let entry_node = if entry_vertices.len() == 1 {
+                *entry_vertices.iter().next().unwrap()
             } else {
                 self.fresh_block()
             };
 
-            if footer.index() == 7 {
-                let please_remove = 1;
-                eprintln!("entry={entry:?},exit={exit:?},footer={footer:?}");
-            }
-
-            self.branch_if(footer, exit, &rep, CondVal { val: 0, of: 1 });
-            self.branch_if(footer, entry, &rep, CondVal { val: 1, of: 1 });
-
-            let loop_info = LoopState {
-                entry: &entry_nodes,
-                rep: &self_loops,
-                exit: &exit_nodes,
-                scc: &in_scc,
-                rep_var: &rep,
-                entry_node: entry,
-                tail_node: footer,
-                exit_node: exit,
+            let exit_node = if exit_vertices.len() == 1 {
+                *exit_vertices.iter().next().unwrap()
+            } else {
+                self.fresh_block()
             };
 
-            // NB: we don't handle the case where there is >1 entry node but
-            // only one exit, like optir. We should potentially fix that.
+            let rep_id = state.fresh();
+            let loop_tail = if !repetition_arcs.is_empty() {
+                let tail_node = self.fresh_block();
+                self.branch_if(tail_node, exit_node, &rep_id, CondVal { val: 0, of: 2 });
+                self.branch_if(tail_node, entry_node, &rep_id, CondVal { val: 1, of: 2 });
+                tail_node
+            } else {
+                exit_node
+            };
 
-            if entry_targets.count_ones(..) > 1 {
-                self.split_entry_rep(&loop_info, state);
+            // demux through the entry block.
+            let (block_map, cond_id) =
+                self.make_demux_node(entry_node, entry_vertices.iter().copied(), state);
+            // Now do the mux
+            for edge_id in entry_arcs.iter().copied() {
+                let (src, target) = self.graph.edge_endpoints(edge_id).unwrap();
+                let branch = self.graph.remove_edge(edge_id).unwrap();
+                let ann = Annotation::AssignCond {
+                    dst: cond_id.clone(),
+                    cond: block_map[&target],
+                };
+                match &branch.op {
+                    BranchOp::Jmp
+                    | BranchOp::Cond {
+                        val: CondVal { val: 0, of: 1 },
+                        ..
+                    } => {
+                        // For unconditional jumps, simply annotate the
+                        // source block and reroute the edge
+                        self.graph[src].footer.push(ann);
+                        self.graph.add_edge(src, entry_node, branch);
+                    }
+                    BranchOp::Cond { .. } => {
+                        // For conditional jumps, create a new node and
+                        // route flow through it before jumping to the entry
+                        // node.
+                        let intermediate = self.fresh_block();
+                        self.graph[intermediate].footer.push(ann);
+                        self.graph.add_edge(src, intermediate, branch);
+                        self.graph.add_edge(intermediate, entry_node, JMP);
+                    }
+                    BranchOp::RetVal { .. } => panic!("unexpected return edge"),
+                }
             }
 
-            self.split_exit(&loop_info, state);
+            // mux repetition arcs through the loop tail.
+            for edge_id in repetition_arcs.iter().copied() {
+                let (src, target) = self.graph.edge_endpoints(edge_id).unwrap();
+                let branch = self.graph.remove_edge(edge_id).unwrap();
+                let anns = [
+                    Annotation::AssignCond {
+                        dst: cond_id.clone(),
+                        cond: block_map[&target],
+                    },
+                    Annotation::AssignCond {
+                        dst: rep_id.clone(),
+                        cond: 1,
+                    },
+                ];
+                match &branch.op {
+                    BranchOp::Jmp
+                    | BranchOp::Cond {
+                        val: CondVal { val: 0, of: 1 },
+                        ..
+                    } => {
+                        // For unconditional jumps, simply annotate the
+                        // source block and reroute the edge
+                        self.graph[src].footer.extend(anns.into_iter());
+                        self.graph.add_edge(src, loop_tail, branch);
+                    }
+                    BranchOp::Cond { .. } => {
+                        // For conditional jumps, create a new node and
+                        // route flow through it before jumping to the entry
+                        // node.
+                        let intermediate = self.fresh_block();
+                        self.graph[intermediate].footer.extend(anns.into_iter());
+                        self.graph.add_edge(src, intermediate, branch);
+                        self.graph.add_edge(intermediate, loop_tail, JMP);
+                    }
+                    BranchOp::RetVal { .. } => panic!("unexpected return edge"),
+                }
+            }
 
-            if n_exits == 0 {
+            // Now demux exit paths through the exit node:
+
+            let (block_map, cond_id) =
+                self.make_demux_node(exit_node, exit_vertices.iter().copied(), state);
+
+            for edge_id in exit_arcs.iter().copied() {
+                let (src, target) = self.graph.edge_endpoints(edge_id).unwrap();
+                let branch = self.graph.remove_edge(edge_id).unwrap();
+                let anns = [
+                    Annotation::AssignCond {
+                        dst: cond_id.clone(),
+                        cond: block_map[&target],
+                    },
+                    Annotation::AssignCond {
+                        dst: rep_id.clone(),
+                        cond: 0,
+                    },
+                ];
+                match &branch.op {
+                    BranchOp::Jmp
+                    | BranchOp::Cond {
+                        val: CondVal { val: 0, of: 1 },
+                        ..
+                    } => {
+                        // For unconditional jumps, simply annotate the
+                        // source block and reroute the edge
+                        self.graph[src].footer.extend(anns.into_iter());
+                        self.graph.add_edge(src, loop_tail, branch);
+                    }
+                    BranchOp::Cond { .. } => {
+                        // For conditional jumps, create a new node and
+                        // route flow through it before jumping to the entry
+                        // node.
+                        let intermediate = self.fresh_block();
+                        self.graph[intermediate].footer.extend(anns.into_iter());
+                        self.graph.add_edge(src, intermediate, branch);
+                        self.graph.add_edge(intermediate, loop_tail, JMP);
+                    }
+                    BranchOp::RetVal { .. } => panic!("unexpected return edge"),
+                }
+            }
+            if exit_arcs.is_empty() {
                 // Infinite loop
-                self.graph.remove_node(exit);
+                self.graph.remove_node(exit_node);
             }
 
             // Recursively restructure the inner loop.
-            self.restructure_inner(&in_scc, state);
+            self.restructure_loops(&scc_set, state);
         }
     }
 
     fn split_edges(&mut self, node: NodeIndex) {
-        let consider_refolding = 1;
         let mut has_jmp = false;
         let mut walker = self
             .graph
             .neighbors_directed(node, Direction::Outgoing)
             .detach();
-        let mut edges = Vec::new();
-        while let Some(x) = walker.next(&self.graph) {
-            edges.push(x);
-        }
-
-        for (edge, other) in edges {
+        while let Some((edge, other)) = walker.next(&self.graph) {
             assert!(!has_jmp);
             match &self.graph.edge_weight(edge).unwrap().op {
                 BranchOp::Jmp => {
@@ -276,9 +349,13 @@ impl Cfg {
             let cur_len = u32::try_from(blocks.len()).unwrap();
             blocks.entry(node).or_insert(cur_len);
         }
+        let cond = state.fresh();
+
+        if blocks.len() == 1 && *blocks.iter().next().unwrap().0 == node {
+            return (blocks, cond);
+        }
 
         let n_blocks = u32::try_from(blocks.len()).unwrap();
-        let cond = state.fresh();
         for (block, val) in blocks.iter() {
             self.branch_if(
                 node,
@@ -291,101 +368,6 @@ impl Cfg {
             );
         }
         (blocks, cond)
-    }
-
-    fn split_exit(&mut self, loop_info: &LoopState, state: &mut RestructureState) {
-        // Demux in the exit block
-
-        let (exit_blocks, cond) = self.make_demux_node(
-            loop_info.exit_node,
-            loop_info.exit.ones().map(NodeIndex::new),
-            state,
-        );
-
-        for node in loop_info.exit.ones().map(NodeIndex::new) {
-            // First: split edges coming into this node:
-            self.graph
-                .neighbors_directed(node, Direction::Incoming)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .for_each(|node| self.split_edges(node));
-
-            let val = exit_blocks[&node];
-            // Then branch them all to the tail.
-            let mut walker = self
-                .graph
-                .neighbors_directed(node, Direction::Incoming)
-                .detach();
-
-            while let Some((edge, src)) = walker.next(&self.graph) {
-                let please_uncomment = 1;
-                // if !loop_info.scc.is_visited(&src) {
-                //     continue;
-                // }
-                let weight = self.graph.remove_edge(edge).unwrap();
-                debug_assert!(matches!(&weight.op, BranchOp::Jmp));
-                let footer = &mut self.graph[node].footer;
-                footer.push(Annotation::AssignCond {
-                    dst: cond.clone(),
-                    cond: val,
-                });
-                footer.push(Annotation::AssignCond {
-                    dst: loop_info.rep_var.clone(),
-                    cond: 0,
-                });
-                self.graph.add_edge(node, loop_info.tail_node, weight);
-            }
-        }
-    }
-
-    fn split_entry_rep(&mut self, loop_info: &LoopState, state: &mut RestructureState) {
-        let targets = Vec::from_iter(
-            loop_info
-                .entry
-                .ones()
-                .map(NodeIndex::new)
-                .flat_map(|n| self.graph.neighbors_directed(n, Direction::Outgoing)),
-        );
-        let (entry_blocks, cond) = self.make_demux_node(loop_info.entry_node, targets, state);
-
-        // For each node that has a jmp into the scc:
-        for node in loop_info
-            .entry
-            .ones()
-            .chain(loop_info.rep.ones())
-            .map(NodeIndex::new)
-        {
-            // Look at its neighbors:
-            let mut walker = self
-                .graph
-                .neighbors_directed(node, Direction::Outgoing)
-                .detach();
-
-            while let Some((edge, dst)) = walker.next(&self.graph) {
-                if !loop_info.scc.is_visited(&dst) {
-                    continue;
-                }
-                // Given a branch into the SCC, add a footer assigning to the
-                // destination block, then add reroute the edge to the entry block.
-                let weight = self.graph.remove_edge(edge).unwrap();
-                debug_assert!(matches!(&weight.op, BranchOp::Jmp));
-                let val = entry_blocks[&dst];
-                let footer = &mut self.graph[node].footer;
-                footer.push(Annotation::AssignCond {
-                    dst: cond.clone(),
-                    cond: val,
-                });
-                if loop_info.rep.is_visited(&node) {
-                    footer.push(Annotation::AssignCond {
-                        dst: loop_info.rep_var.clone(),
-                        cond: 1,
-                    });
-                    self.graph.add_edge(node, loop_info.tail_node, weight);
-                } else {
-                    self.graph.add_edge(node, loop_info.entry_node, weight);
-                }
-            }
-        }
     }
 
     fn restructure_branches(&mut self, state: &mut RestructureState) {
