@@ -186,117 +186,44 @@ impl Cfg {
             // demux through the entry block.
             let (block_map, cond_id) =
                 self.make_demux_node(entry_node, entry_vertices.iter().copied(), state);
-            // Now do the mux
-            for edge_id in entry_arcs.iter().copied() {
-                let (src, target) = self.graph.edge_endpoints(edge_id).unwrap();
-                let branch = self.graph.remove_edge(edge_id).unwrap();
-                let ann = Annotation::AssignCond {
+
+            self.rewrite_arcs(entry_arcs.iter().copied(), |target, anns| {
+                anns.push(Annotation::AssignCond {
                     dst: cond_id.clone(),
                     cond: block_map[&target],
-                };
-                match &branch.op {
-                    BranchOp::Jmp
-                    | BranchOp::Cond {
-                        val: CondVal { val: 0, of: 1 },
-                        ..
-                    } => {
-                        // For unconditional jumps, simply annotate the
-                        // source block and reroute the edge
-                        self.graph[src].footer.push(ann);
-                        self.graph.add_edge(src, entry_node, branch);
-                    }
-                    BranchOp::Cond { .. } => {
-                        // For conditional jumps, create a new node and
-                        // route flow through it before jumping to the entry
-                        // node.
-                        let intermediate = self.fresh_block();
-                        self.graph[intermediate].footer.push(ann);
-                        self.graph.add_edge(src, intermediate, branch);
-                        self.graph.add_edge(intermediate, entry_node, JMP);
-                    }
-                    BranchOp::RetVal { .. } => panic!("unexpected return edge"),
-                }
-            }
+                });
+                entry_node
+            });
 
-            // mux repetition arcs through the loop tail.
-            for edge_id in repetition_arcs.iter().copied() {
-                let (src, target) = self.graph.edge_endpoints(edge_id).unwrap();
-                let branch = self.graph.remove_edge(edge_id).unwrap();
-                let anns = [
-                    Annotation::AssignCond {
-                        dst: cond_id.clone(),
-                        cond: block_map[&target],
-                    },
-                    Annotation::AssignCond {
-                        dst: rep_id.clone(),
-                        cond: 1,
-                    },
-                ];
-                match &branch.op {
-                    BranchOp::Jmp
-                    | BranchOp::Cond {
-                        val: CondVal { val: 0, of: 1 },
-                        ..
-                    } => {
-                        // For unconditional jumps, simply annotate the
-                        // source block and reroute the edge
-                        self.graph[src].footer.extend(anns.into_iter());
-                        self.graph.add_edge(src, loop_tail, branch);
-                    }
-                    BranchOp::Cond { .. } => {
-                        // For conditional jumps, create a new node and
-                        // route flow through it before jumping to the entry
-                        // node.
-                        let intermediate = self.fresh_block();
-                        self.graph[intermediate].footer.extend(anns.into_iter());
-                        self.graph.add_edge(src, intermediate, branch);
-                        self.graph.add_edge(intermediate, loop_tail, JMP);
-                    }
-                    BranchOp::RetVal { .. } => panic!("unexpected return edge"),
-                }
-            }
+            self.rewrite_arcs(repetition_arcs.iter().copied(), |target, anns| {
+                anns.push(Annotation::AssignCond {
+                    dst: cond_id.clone(),
+                    cond: block_map[&target],
+                });
+                anns.push(Annotation::AssignCond {
+                    dst: rep_id.clone(),
+                    cond: 1,
+                });
+                loop_tail
+            });
 
             // Now demux exit paths through the exit node:
 
             let (block_map, cond_id) =
                 self.make_demux_node(exit_node, exit_vertices.iter().copied(), state);
 
-            for edge_id in exit_arcs.iter().copied() {
-                let (src, target) = self.graph.edge_endpoints(edge_id).unwrap();
-                let branch = self.graph.remove_edge(edge_id).unwrap();
-                let anns = [
-                    Annotation::AssignCond {
-                        dst: cond_id.clone(),
-                        cond: block_map[&target],
-                    },
-                    Annotation::AssignCond {
-                        dst: rep_id.clone(),
-                        cond: 0,
-                    },
-                ];
-                match &branch.op {
-                    BranchOp::Jmp
-                    | BranchOp::Cond {
-                        val: CondVal { val: 0, of: 1 },
-                        ..
-                    } => {
-                        // For unconditional jumps, simply annotate the
-                        // source block and reroute the edge
-                        self.graph[src].footer.extend(anns.into_iter());
-                        self.graph.add_edge(src, loop_tail, branch);
-                    }
-                    BranchOp::Cond { .. } => {
-                        // For conditional jumps, create a new node and
-                        // route flow through it before jumping to the entry
-                        // node.
-                        let intermediate = self.fresh_block();
-                        self.graph[intermediate].footer.extend(anns.into_iter());
-                        self.graph.add_edge(src, intermediate, branch);
-                        self.graph.add_edge(intermediate, loop_tail, JMP);
-                    }
-                    BranchOp::RetVal { .. } => panic!("unexpected return edge"),
-                }
-            }
+            self.rewrite_arcs(exit_arcs.iter().copied(), |target, anns| {
+                anns.push(Annotation::AssignCond {
+                    dst: cond_id.clone(),
+                    cond: block_map[&target],
+                });
+                anns.push(Annotation::AssignCond {
+                    dst: rep_id.clone(),
+                    cond: 0,
+                });
+                loop_tail
+            });
+
             if exit_arcs.is_empty() {
                 // Infinite loop
                 self.graph.remove_node(exit_node);
