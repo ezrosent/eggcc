@@ -4,17 +4,15 @@ use hashbrown::{HashMap, HashSet};
 use petgraph::{
     algo::{dominators, tarjan_scc},
     graph::NodeIndex,
-    stable_graph::{EdgeIndex, StableDiGraph},
-    visit::{EdgeRef, NodeFiltered, VisitMap, Visitable},
+    stable_graph::EdgeIndex,
+    visit::{EdgeRef, NodeFiltered, VisitMap},
     Direction,
 };
 
 use crate::{
-    cfg::{BasicBlock, BlockName, Branch, BranchOp, Cfg, CondVal, Identifier},
+    cfg::{BasicBlock, BlockName, Branch, BranchOp, Cfg, CondVal, Identifier, NodeSet},
     rvsdg::Annotation,
 };
-
-type NodeSet = <StableDiGraph<BasicBlock, Branch> as Visitable>::Map;
 
 fn node_set(nodes: impl IntoIterator<Item = NodeIndex>) -> NodeSet {
     let mut set = NodeSet::default();
@@ -37,16 +35,6 @@ impl RestructureState {
         self.n_names += 1;
         Identifier::Num(n)
     }
-}
-
-macro_rules! remove_edge {
-    ($graph:expr, $edge:expr) => {{
-        let weight = $graph.remove_edge($edge).unwrap();
-        if let Some(pos) = &weight.pos {
-            eprintln!("{}: removing edge with {pos:?}", line!());
-        }
-        weight
-    }};
 }
 
 impl Cfg {
@@ -254,7 +242,7 @@ impl Cfg {
             }
 
             // We have a conditional branch. Reroute through a placeholder.
-            let weight = remove_edge!(self.graph, edge); // self.graph.remove_edge(edge).unwrap();
+            let weight = self.graph.remove_edge(edge).unwrap();
             let placeholder = self.fresh_block();
 
             // We had  node => other
@@ -367,14 +355,3 @@ const JMP: Branch = Branch {
     op: BranchOp::Jmp,
     pos: None,
 };
-
-struct LoopState<'a> {
-    entry: &'a NodeSet,
-    rep: &'a NodeSet,
-    exit: &'a NodeSet,
-    scc: &'a NodeSet,
-    rep_var: &'a Identifier,
-    entry_node: NodeIndex,
-    tail_node: NodeIndex,
-    exit_node: NodeIndex,
-}

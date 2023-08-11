@@ -8,9 +8,12 @@ use std::mem;
 
 use bril_rs::{Argument, Code, EffectOps, Function, Instruction, Position};
 use hashbrown::HashMap;
-use petgraph::{graph::NodeIndex, stable_graph::StableDiGraph};
+use petgraph::{graph::NodeIndex, stable_graph::StableDiGraph, visit::Visitable};
 
 use crate::rvsdg::Annotation;
+
+/// A subset of nodes for a particular CFG.
+pub(crate) type NodeSet = <StableDiGraph<BasicBlock, Branch> as Visitable>::Map;
 
 #[cfg(test)]
 mod tests;

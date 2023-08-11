@@ -17,7 +17,8 @@
 //! * RVSDG conversion: Once we have a structured CFG we can convert the
 //! program (still written in terms of gotos) to the structured format for
 //! RVSDGs. Part of this conversion process is the discovery of what the
-//! "inputs" and "outputs" are for different RVSDG nodes.
+//! "inputs" and "outputs" are for different RVSDG nodes; the main subroutine we
+//! use there is a live variable analysis.
 //!
 //! # References
 //!
@@ -28,8 +29,10 @@
 //!
 //! In addition to those papers, the Jamey Sharp's
 //! [optir](https://github.com/jameysharp/optir) project is a major inspiration.
+pub(crate) mod live_variables;
 pub(crate) mod restructure;
 
+use bril_rs::ValueOps;
 use thiserror::Error;
 
 use crate::cfg::Identifier;
@@ -43,4 +46,30 @@ pub(crate) type Result<T = ()> = std::result::Result<T, RvsdgError>;
 #[derive(Debug)]
 pub(crate) enum Annotation {
     AssignCond { dst: Identifier, cond: u32 },
+}
+
+pub(crate) type Id = u32;
+
+pub(crate) struct Expr<T> {
+    op: ValueOps,
+    args: Vec<T>,
+}
+
+pub(crate) enum Operand {
+    Project(u32),
+    Id(Id),
+}
+
+pub(crate) enum RvsdgBody {
+    PureOp(Expr<Operand>),
+    Gamma {
+        pred: Operand,
+        cases: Vec<Operand>,
+        outputs: Vec<Vec<Operand>>,
+    },
+    Theta {
+        pred: Operand,
+        inputs: Vec<Operand>,
+        outputs: Vec<Operand>,
+    },
 }

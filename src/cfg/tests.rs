@@ -99,5 +99,11 @@ fn restructure_basic() {
     let prog = parse_from_string(include_str!("../../data/unstructured.bril"));
     let mut cfg = to_cfg(&prog.functions[0]);
     cfg.restructure();
+    // TODO: more tests.
     eprintln!("{:#?}", Dot::new(&cfg.graph));
 }
+
+// TODO: graphs to try:
+// a -> b, a -> c, b -> c, c -> b
+// AND
+// a -> b, a-> c, b -> d, c -> e, c -> f, d -> e, e -> f, f -> e , e -> d
