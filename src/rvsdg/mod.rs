@@ -58,6 +58,11 @@ pub(crate) enum RvsdgError {
         id: Identifier,
         pos: Option<bril_rs::Position>,
     },
+
+    // NB: We should  be able to suppor these patterns, but it might be better
+    // to desugar them away as part of the CFG parsing step.
+    #[error("Multiple branches from loop tail to head ({pos:?})")]
+    UnsupportedLoopTail { pos: Option<bril_rs::Position> },
 }
 
 pub(crate) type Result<T = ()> = std::result::Result<T, RvsdgError>;
@@ -77,15 +82,19 @@ pub(crate) enum Expr {
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Operand {
+    /// A reference to an argument in the enclosing region.
     Arg(u32),
+    /// Another node in the RVSDG.
     Id(Id),
+    /// Project a single output from a multi-output region.
+    Project(u16, Id),
 }
 
 pub(crate) enum RvsdgBody {
     PureOp(Expr),
     Gamma {
         pred: Operand,
-        cases: Vec<Operand>,
+        inputs: Vec<Operand>,
         outputs: Vec<Vec<Operand>>,
     },
     Theta {

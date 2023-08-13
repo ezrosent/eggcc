@@ -1,19 +1,32 @@
 //! Conversion from (structured) CFG to RVSDG.
+//!
+//! This works by running a single pass (inspired by optir) over the
+//! restructured CFG. The core idea is to "symbolically execute" the structured
+//! CFG where unknown values (e.g. those of loop variables, or those of join
+//! points) are replaced with references to either arguments to the enclosing
+//! region or outputs from some region. To detect the start of loop regions, we
+//! look for back-edges dominated by the current node. To detect the start of
+//! branch regions, we look for nodes with more than one successor.
 
 use bril_rs::{ConstOps, EffectOps, Instruction, Literal, Position, Type, ValueOps};
 use hashbrown::HashMap;
-use petgraph::visit::IntoNeighborsDirected;
+use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use petgraph::{algo::dominators::Dominators, stable_graph::NodeIndex};
 
-use crate::cfg::{BranchOp, Cfg, Identifier};
+use crate::cfg::{BranchOp, Cfg, CondVal, Identifier};
 use crate::rvsdg::{Annotation, Result};
 
-use super::live_variables::Names;
+use super::live_variables::{live_variables, Names};
 use super::{
     live_variables::{LiveVariableAnalysis, VarId},
     Expr, Id, Operand, RvsdgBody, RvsdgError,
 };
+
+// pub(crate) fn to_rvsdg(cfg: &mut Cfg) -> Result<RvsdgBody> {
+//     cfg.restructure();
+//     let analysis = live_variables(cfg);
+// }
 
 pub(crate) struct RvsdgBuilder<'a> {
     cfg: &'a mut Cfg,
@@ -25,7 +38,7 @@ pub(crate) struct RvsdgBuilder<'a> {
 }
 
 impl<'a> RvsdgBuilder<'a> {
-    fn try_loop(&mut self, block: NodeIndex) -> Result<NodeIndex> {
+    fn try_loop(&mut self, block: NodeIndex) -> Result<Option<NodeIndex>> {
         // First, check if this is the head of a loop. There are two cases here:
         //
         // 1. The loop is a single block, in which case this block will have
@@ -71,9 +84,9 @@ impl<'a> RvsdgBuilder<'a> {
 
         // Now we "run" the loop until we reach the end:
         let tail = if let Some(tail) = loop_tail {
-            let mut next = self.try_branch(block)?;
+            let mut next = self.try_branch(block)?.unwrap();
             while next != tail {
-                next = self.try_loop(block)?;
+                next = self.try_loop(block)?.unwrap();
             }
             tail
         } else {
@@ -90,42 +103,194 @@ impl<'a> RvsdgBuilder<'a> {
         }
 
         // Now to discover the loop predicate:
-        // TODO:
-        // * We may want to rethink our loop predicates here.
-        // * All "native" bril branches are booleans
-        // * All "synthesized" branches are switches.
-        // * We could have a specialized Condition representation (Theta { pred: Pred(n_opts: 2, op: Operand))
-        // let mut op = None;
-        for edge in self.cfg.graph.edges_connecting(tail, block) {
-            match &edge.weight().op {
-                BranchOp::Jmp => {
-                    //          assert!(op.is_none());
-                    todo!()
-                }
-                BranchOp::Cond { arg, val } => todo!(),
-                BranchOp::RetVal { arg } => todo!(),
+        let branches = Vec::from_iter(
+            self.cfg
+                .graph
+                .edges_connecting(tail, block)
+                .map(|e| e.weight().op.clone()),
+        );
+
+        if branches.len() != 1 {
+            return Err(RvsdgError::UnsupportedLoopTail {
+                pos: self.cfg.graph[tail].pos.clone(),
+            });
+        }
+
+        let pred = match branches.into_iter().next().unwrap() {
+            BranchOp::Jmp
+            | BranchOp::Cond {
+                val: CondVal { of: 1, .. },
+                ..
+            } => {
+                // Predicate is just "true"
+                Operand::Id(get_id(
+                    &mut self.expr,
+                    RvsdgBody::PureOp(Expr::Const(
+                        ConstOps::Const,
+                        Type::Bool,
+                        Literal::Bool(true),
+                    )),
+                ))
             }
-            todo!()
+            BranchOp::Cond {
+                arg,
+                val: CondVal { val, of },
+            } => {
+                assert_eq!(
+                    of, 2,
+                    "loop predicate has more than two options (restructuring should avoid this)"
+                );
+                let var = self.analysis.intern.intern(arg);
+                let op = get_op(var, &None, &self.env, &self.analysis.intern)?;
+                if val == 0 {
+                    // We need to negate the operand
+                    Operand::Id(get_id(
+                        &mut self.expr,
+                        RvsdgBody::PureOp(Expr::Op(ValueOps::Not, vec![op])),
+                    ))
+                } else {
+                    op
+                }
+            }
+            BranchOp::RetVal { .. } => {
+                panic!("something has gone wrong! We are 'returning' to the head of a loop!")
+            }
+        };
+
+        let theta_node = get_id(
+            &mut self.expr,
+            RvsdgBody::Theta {
+                pred,
+                inputs,
+                outputs,
+            },
+        );
+
+        let live_vars = self.analysis.var_state(block).unwrap();
+        for (i, var) in live_vars.live_out.iter().enumerate() {
+            self.env
+                .insert(var, Operand::Project(u16::try_from(i).unwrap(), theta_node));
+        }
+        Ok(self
+            .cfg
+            .graph
+            .neighbors_directed(tail, Direction::Outgoing)
+            .find(|succ| succ != &block))
+    }
+
+    fn try_branch(&mut self, block: NodeIndex) -> Result<Option<NodeIndex>> {
+        self.translate_block(block)?;
+        if self
+            .cfg
+            .graph
+            .neighbors_directed(block, Direction::Outgoing)
+            .nth(1)
+            .is_none()
+        {
+            // This is a linear region
+            return Ok(self
+                .cfg
+                .graph
+                .neighbors_directed(block, Direction::Outgoing)
+                .next());
+        }
+        let placeholder = Identifier::Num(!0);
+        let mut pred = placeholder.clone();
+        let mut succs = Vec::from_iter(self.cfg.graph.edges_directed(block, Direction::Outgoing).map(|e| {
+            if let BranchOp::Cond { arg, val: CondVal { val, of:_ }} = &e.weight().op {
+                if pred == placeholder {
+                    pred = arg.clone();
+                }
+                (*val, e.target())
+            } else {
+                panic!("Invalid mix of conditional and non-conditional branches in block {block:?}")
+            }
+        }));
+        succs.sort_by_key(|(val, _)| *val);
+        // Branches should be contiguous.
+        succs
+            .iter()
+            .enumerate()
+            .for_each(|(i, (val, _))| assert_eq!(i, *val as usize));
+
+        let mut inputs = Vec::<Operand>::new();
+        let mut outputs = Vec::<Vec<Operand>>::new();
+        let live_vars = self.analysis.var_state(block).unwrap();
+        for var in live_vars.live_out.iter() {
+            inputs.push(get_op(var, &None, &self.env, &self.analysis.intern)?);
         }
 
-        // let theta_node = get_id(&mut self.expr, RvsdgBody::Theta { pred: (), inputs, outputs })
+        let mut next = None;
+        for (_, succ) in succs {
+            // First, make sure that all inputs are correctly bound to inputs to the block.
+            let live_vars = self.analysis.var_state(block).unwrap();
+            for (i, var) in live_vars.live_out.iter().enumerate() {
+                self.env.insert(var, Operand::Arg(i as u32));
+            }
+            // Loop until we reach a join point.
+            let mut curr = succ;
+            loop {
+                curr = self.try_loop(curr)?.unwrap();
+                if self
+                    .cfg
+                    .graph
+                    .neighbors_directed(curr, Direction::Incoming)
+                    .nth(1)
+                    .is_some()
+                {
+                    break;
+                }
+            }
 
-        todo!()
-    }
+            let pos = &self.cfg.graph[curr].pos;
 
-    fn try_branch(&mut self, block: NodeIndex) -> Result<NodeIndex> {
-        todo!()
-    }
-
-    fn get_op(&self, var: VarId, pos: &Option<Position>) -> Result<Operand> {
-        match self.env.get(&var) {
-            Some(op) => Ok(*op),
-            None => Err(RvsdgError::UndefinedId {
-                id: self.analysis.intern.get_var(var).clone(),
-                pos: pos.clone(),
-            }),
+            // Use the join point's live outputs
+            let live_vars = self.analysis.var_state(curr).unwrap();
+            let mut output_vec = Vec::new();
+            for var in live_vars.live_in.iter() {
+                let op = get_op(var, pos, &self.env, &self.analysis.intern)?;
+                output_vec.push(op);
+            }
+            outputs.push(output_vec);
+            if let Some(next) = next {
+                assert_eq!(next, curr);
+            } else {
+                next = Some(curr);
+            }
         }
+
+        let next = next.unwrap();
+        let pred_var = self.analysis.intern.intern(pred);
+        let pred = get_op(
+            pred_var,
+            &self.cfg.graph[block].pos,
+            &self.env,
+            &self.analysis.intern,
+        )?;
+        let gamma_node = get_id(
+            &mut self.expr,
+            RvsdgBody::Gamma {
+                pred,
+                inputs,
+                outputs,
+            },
+        );
+        // Remap all input variables to the output of this node.
+        for (i, var) in self
+            .analysis
+            .var_state(next)
+            .unwrap()
+            .live_in
+            .iter()
+            .enumerate()
+        {
+            self.env
+                .insert(var, Operand::Project(u16::try_from(i).unwrap(), gamma_node));
+        }
+
+        Ok(Some(next))
     }
+
     fn translate_block(&mut self, block: NodeIndex) -> Result<()> {
         let block = &self.cfg.graph[block];
 

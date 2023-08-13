@@ -86,7 +86,7 @@ pub(crate) struct Branch {
 }
 
 /// The types of branch.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub(crate) enum BranchOp {
     /// An unconditional branch to a block.
     Jmp,
