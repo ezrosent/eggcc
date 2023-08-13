@@ -110,12 +110,15 @@ impl Names {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) struct VarSet {
     vars: FixedBitSet,
 }
 
 impl VarSet {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = VarId> + '_ {
+        self.vars.ones().map(|x| VarId(x as u32))
+    }
     fn insert(&mut self, var: VarId) -> bool {
         let bit = var.0 as usize;
         if self.vars.len() <= bit {
@@ -142,7 +145,7 @@ impl VarSet {
 }
 
 /// The per-basic block state associated with the live variable analysis.
-struct LiveVariableState {
+pub(crate) struct LiveVariableState {
     /// The variables live on entry to a given basic block.
     pub(crate) live_in: VarSet,
     /// The variables live on exit from the basic block.
@@ -174,7 +177,7 @@ impl LiveVariableAnalysis {
         })
     }
 
-    fn var_state(&mut self, node: NodeIndex) -> Option<&LiveVariableState> {
+    pub(crate) fn var_state(&self, node: NodeIndex) -> Option<&LiveVariableState> {
         self.analysis.get(&node)
     }
 

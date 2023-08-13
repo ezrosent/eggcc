@@ -29,17 +29,36 @@
 //!
 //! In addition to those papers, the Jamey Sharp's
 //! [optir](https://github.com/jameysharp/optir) project is a major inspiration.
+pub(crate) mod from_cfg;
 pub(crate) mod live_variables;
 pub(crate) mod restructure;
 
-use bril_rs::ValueOps;
+use bril_rs::{ConstOps, Literal, Type, ValueOps};
 use thiserror::Error;
 
 use crate::cfg::Identifier;
 
 /// Errors from the rvsdg module.
 #[derive(Debug, Error)]
-pub(crate) enum RvsdgError {}
+pub(crate) enum RvsdgError {
+    #[error("Unsupported operation: {op:?}, {pos:?}")]
+    UnsupportedOperation {
+        op: bril_rs::ValueOps,
+        pos: Option<bril_rs::Position>,
+    },
+
+    #[error("Unsupported effect: {op:?}, {pos:?}")]
+    UnsupportedEffect {
+        op: bril_rs::EffectOps,
+        pos: Option<bril_rs::Position>,
+    },
+
+    #[error("Scope error: undefined id {id:?}, {pos:?}")]
+    UndefinedId {
+        id: Identifier,
+        pos: Option<bril_rs::Position>,
+    },
+}
 
 pub(crate) type Result<T = ()> = std::result::Result<T, RvsdgError>;
 
@@ -50,18 +69,20 @@ pub(crate) enum Annotation {
 
 pub(crate) type Id = u32;
 
-pub(crate) struct Expr<T> {
-    op: ValueOps,
-    args: Vec<T>,
+pub(crate) enum Expr {
+    Op(ValueOps, Vec<Operand>),
+    Call(Identifier, Vec<Operand>),
+    Const(ConstOps, Type, Literal),
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Operand {
-    Project(u32),
+    Arg(u32),
     Id(Id),
 }
 
 pub(crate) enum RvsdgBody {
-    PureOp(Expr<Operand>),
+    PureOp(Expr),
     Gamma {
         pred: Operand,
         cases: Vec<Operand>,
