@@ -14,7 +14,7 @@ use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use petgraph::{algo::dominators::Dominators, stable_graph::NodeIndex};
 
-use crate::cfg::{BranchOp, Cfg, CondVal, Identifier};
+use crate::cfg::{ret_id, BranchOp, Cfg, CondVal, Identifier};
 use crate::rvsdg::{Annotation, Result};
 
 use super::live_variables::{live_variables, Names};
@@ -151,9 +151,6 @@ impl<'a> RvsdgBuilder<'a> {
                 } else {
                     op
                 }
-            }
-            BranchOp::RetVal { .. } => {
-                panic!("something has gone wrong! We are 'returning' to the head of a loop!")
             }
         };
 
@@ -401,6 +398,14 @@ impl<'a> RvsdgBuilder<'a> {
                     );
                     let dest_var = self.analysis.intern.intern(dst.clone());
                     self.env.insert(dest_var, Operand::Id(id));
+                }
+                Annotation::AssignRet { src } => {
+                    let src_var = self.analysis.intern.intern(src.clone());
+                    let ret_var = self.analysis.intern.intern(ret_id());
+                    self.env.insert(
+                        ret_var,
+                        get_op(src_var, &block.pos, &self.env, &self.analysis.intern)?,
+                    );
                 }
             }
         }

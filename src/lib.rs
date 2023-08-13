@@ -98,7 +98,7 @@ impl Optimizer {
 
     pub fn optimize(&mut self, bril_program: &Program) -> Result<Program, EggCCError> {
         assert!(!bril_program.functions.is_empty());
-        assert!(bril_program.functions.iter().any(|f| { f.name == "main" }));
+        assert!(bril_program.functions.iter().any(|f| { &f.name == "main" }));
         assert!(bril_program.imports.is_empty());
 
         let egg_fns: HashMap<String, Expr> = bril_program

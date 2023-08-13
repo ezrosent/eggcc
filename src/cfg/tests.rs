@@ -81,8 +81,8 @@ cfg_test!(
         "for.body" = (Cond { arg: "is_valid".into(), val: false.into() }) => "next.loop",
         "rec.func" = (Jmp) => "next.loop",
         "next.loop" = (Jmp) => "for.cond",
-        "next.ret" = (RetVal { arg: "icount".into() }) => EXIT,
-        "next.ret.1" = (RetVal { arg: "icount".into() }) => EXIT,
+        "next.ret" = (Jmp) => EXIT,
+        "next.ret.1" = (Jmp) => EXIT,
     ]
 );
 

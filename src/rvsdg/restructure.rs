@@ -102,7 +102,6 @@ impl Cfg {
                     self.graph.add_edge(src, intermediate, branch);
                     self.graph.add_edge(intermediate, new_target, JMP);
                 }
-                BranchOp::RetVal { .. } => panic!("unexpected return edge"),
             }
         }
     }
@@ -236,9 +235,6 @@ impl Cfg {
                     continue;
                 }
                 BranchOp::Cond { .. } => {}
-                BranchOp::RetVal { .. } => {
-                    panic!("exit block in target set")
-                }
             }
 
             // We have a conditional branch. Reroute through a placeholder.

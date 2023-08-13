@@ -13,7 +13,7 @@ use petgraph::{
     visit::{DfsPostOrder, VisitMap, Visitable},
 };
 
-use crate::cfg::{Cfg, Identifier, NodeSet};
+use crate::cfg::{ret_id, Cfg, Identifier, NodeSet};
 
 use super::Annotation;
 
@@ -26,12 +26,20 @@ pub(crate) fn live_variables(cfg: &Cfg) -> LiveVariableAnalysis {
         let state = analysis.var_state_mut(block);
         let weight = &cfg.graph[block];
 
+        if block == cfg.exit && cfg.has_return_value() {
+            // The exit block uses the return value, if there is one.
+            state.gen.insert(names.intern(ret_id()));
+        }
+
         for ann in weight.footer.iter().rev() {
             match ann {
                 Annotation::AssignCond { dst, .. } => {
                     let var = names.intern(dst.clone());
                     state.kills.insert(var);
                     state.gen.remove(var);
+                }
+                Annotation::AssignRet { src } => {
+                    state.gen.insert(names.intern(src.clone()));
                 }
             }
         }

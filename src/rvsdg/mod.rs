@@ -70,6 +70,7 @@ pub(crate) type Result<T = ()> = std::result::Result<T, RvsdgError>;
 #[derive(Debug)]
 pub(crate) enum Annotation {
     AssignCond { dst: Identifier, cond: u32 },
+    AssignRet { src: Identifier },
 }
 
 pub(crate) type Id = u32;

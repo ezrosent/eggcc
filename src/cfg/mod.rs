@@ -6,7 +6,7 @@
 //! `ret`), and labels. All other instructions are copied into the CFG.
 use std::mem;
 
-use bril_rs::{Argument, Code, EffectOps, Function, Instruction, Position};
+use bril_rs::{Argument, Code, EffectOps, Function, Instruction, Position, Type};
 use hashbrown::HashMap;
 use petgraph::{graph::NodeIndex, stable_graph::StableDiGraph, visit::Visitable};
 
@@ -22,6 +22,10 @@ mod tests;
 pub(crate) enum Identifier {
     Name(Box<str>),
     Num(usize),
+}
+
+pub(crate) fn ret_id() -> Identifier {
+    Identifier::Num(!0)
 }
 
 impl<T: AsRef<str>> From<T> for Identifier {
@@ -92,8 +96,6 @@ pub(crate) enum BranchOp {
     Jmp,
     /// A conditional branch to a block.
     Cond { arg: Identifier, val: CondVal },
-    /// A return statement carrying a value.
-    RetVal { arg: String },
 }
 
 /// The control-flow graph for a single function.
@@ -106,6 +108,13 @@ pub(crate) struct Cfg {
     pub(crate) entry: NodeIndex,
     /// The (single) exit node for the CFG.
     pub(crate) exit: NodeIndex,
+    return_ty: Option<Type>,
+}
+
+impl Cfg {
+    pub(crate) fn has_return_value(&self) -> bool {
+        self.return_ty.is_some()
+    }
 }
 
 /// Get the underyling CFG corresponding to the function `func`.
@@ -115,13 +124,14 @@ pub(crate) struct Cfg {
 pub(crate) fn to_cfg(func: &Function) -> Cfg {
     let mut builder = CfgBuilder::new(func);
     let mut block = Vec::new();
+    let mut anns = Vec::new();
     let mut current = builder.cfg.entry;
     let mut had_branch = false;
     for inst in &func.instrs {
         match inst {
             Code::Label { label, pos } => {
                 let next_block = builder.get_index(label);
-                builder.finish_block(current, mem::take(&mut block));
+                builder.finish_block(current, mem::take(&mut block), mem::take(&mut anns));
                 builder.set_pos(next_block, pos.clone());
                 if !had_branch {
                     builder.add_edge(
@@ -211,11 +221,12 @@ pub(crate) fn to_cfg(func: &Function) -> Cfg {
                         );
                     }
                     [arg] => {
+                        anns.push(Annotation::AssignRet { src: arg.into() });
                         builder.add_edge(
                             current,
                             builder.cfg.exit,
                             Branch {
-                                op: BranchOp::RetVal { arg: arg.clone() },
+                                op: BranchOp::Jmp,
                                 pos: pos.clone(),
                             },
                         );
@@ -226,7 +237,7 @@ pub(crate) fn to_cfg(func: &Function) -> Cfg {
             Code::Instruction(i) => block.push(i.clone()),
         }
     }
-    builder.finish_block(current, mem::take(&mut block));
+    builder.finish_block(current, block, anns);
     builder.build()
 }
 
@@ -246,6 +257,7 @@ impl CfgBuilder {
                 graph,
                 entry,
                 exit,
+                return_ty: func.return_type.clone(),
             },
             label_to_block: HashMap::new(),
         }
@@ -280,10 +292,12 @@ impl CfgBuilder {
                     .add_node(BasicBlock::empty(BlockName::Named(label.into())))
             })
     }
-    fn finish_block(&mut self, index: NodeIndex, block: Vec<Instruction>) {
-        let BasicBlock { instrs, .. } = self.cfg.graph.node_weight_mut(index).unwrap();
+    fn finish_block(&mut self, index: NodeIndex, block: Vec<Instruction>, anns: Vec<Annotation>) {
+        let BasicBlock { instrs, footer, .. } = self.cfg.graph.node_weight_mut(index).unwrap();
         debug_assert!(instrs.is_empty());
+        debug_assert!(footer.is_empty());
         *instrs = block;
+        *footer = anns;
     }
 
     fn set_pos(&mut self, index: NodeIndex, pos: Option<Position>) {
