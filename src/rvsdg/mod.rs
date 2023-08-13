@@ -104,3 +104,15 @@ pub(crate) enum RvsdgBody {
         outputs: Vec<Operand>,
     },
 }
+
+pub(crate) struct RvsdgFunction {
+    /// The number of input arguments to the function.
+    pub(crate) n_args: usize,
+    /// The backing heap for Rvsdg node ids within this function.
+    pub(crate) nodes: Vec<RvsdgBody>,
+    /// The (optional) result pointing into this function.
+    ///
+    /// NB: until effects are supported, the only way to ensure a computation is
+    /// marked as used is to populate a result of some kind.
+    pub(crate) result: Option<Operand>,
+}

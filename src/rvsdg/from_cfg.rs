@@ -10,6 +10,7 @@
 
 use bril_rs::{ConstOps, EffectOps, Instruction, Literal, Position, Type, ValueOps};
 use hashbrown::HashMap;
+use petgraph::algo::dominators;
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 use petgraph::{algo::dominators::Dominators, stable_graph::NodeIndex};
@@ -18,15 +19,50 @@ use crate::cfg::{ret_id, BranchOp, Cfg, CondVal, Identifier};
 use crate::rvsdg::{Annotation, Result};
 
 use super::live_variables::{live_variables, Names};
+use super::RvsdgFunction;
 use super::{
     live_variables::{LiveVariableAnalysis, VarId},
     Expr, Id, Operand, RvsdgBody, RvsdgError,
 };
 
-// pub(crate) fn to_rvsdg(cfg: &mut Cfg) -> Result<RvsdgBody> {
-//     cfg.restructure();
-//     let analysis = live_variables(cfg);
-// }
+pub(crate) fn to_rvsdg(cfg: &mut Cfg) -> Result<RvsdgFunction> {
+    cfg.restructure();
+    let analysis = live_variables(cfg);
+    let dom = dominators::simple_fast(&cfg.graph, cfg.entry);
+    let mut builder = RvsdgBuilder {
+        cfg,
+        expr: Default::default(),
+        analysis,
+        dom,
+        env: Default::default(),
+    };
+
+    for (i, arg) in builder.cfg.args.iter().enumerate() {
+        let arg_var = builder.analysis.intern.intern(&arg.name);
+        builder.env.insert(arg_var, Operand::Arg(i as u32));
+    }
+
+    let next = builder.try_loop(builder.cfg.entry)?;
+    if let Some(next) = next {
+        assert_eq!(next, builder.cfg.exit);
+    }
+    let result = if builder.cfg.has_return_value() {
+        let ret_var = builder.analysis.intern.intern(ret_id());
+        Some(get_op(
+            ret_var,
+            &None,
+            &builder.env,
+            &builder.analysis.intern,
+        )?)
+    } else {
+        None
+    };
+    Ok(RvsdgFunction {
+        n_args: builder.cfg.args.len(),
+        nodes: builder.expr,
+        result,
+    })
+}
 
 pub(crate) struct RvsdgBuilder<'a> {
     cfg: &'a mut Cfg,
