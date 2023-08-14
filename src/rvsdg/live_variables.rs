@@ -4,16 +4,22 @@
 //! optimized) variant of the live variable analysis described in "Iterative
 //! Data-flow Analysis, Revisited", by Keith D. Cooper, Timothy J. Harvey, and
 //! Ken Kennedy.
+use std::fmt;
+
 use bril_rs::Instruction;
 use fixedbitset::FixedBitSet;
 use hashbrown::HashMap;
 use indexmap::IndexSet;
 use petgraph::{
     stable_graph::NodeIndex,
-    visit::{DfsPostOrder, VisitMap, Visitable},
+    visit::{DfsPostOrder, IntoNeighborsDirected, VisitMap, Visitable},
+    Direction,
 };
 
-use crate::cfg::{ret_id, Cfg, Identifier, NodeSet};
+use crate::{
+    cfg::{ret_id, Cfg, Identifier, NodeSet},
+    util::ListDisplay,
+};
 
 use super::Annotation;
 
@@ -84,7 +90,7 @@ pub(crate) fn live_variables(cfg: &Cfg) -> LiveVariableAnalysis {
 
         if changed {
             cfg.graph
-                .neighbors(block)
+                .neighbors_directed(block, Direction::Incoming)
                 .for_each(|succ| worklist.push(succ))
         }
     }
@@ -97,7 +103,7 @@ pub(crate) fn live_variables(cfg: &Cfg) -> LiveVariableAnalysis {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct VarId(u32);
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct Names {
     table: IndexSet<Identifier>,
 }
@@ -150,9 +156,22 @@ impl VarSet {
         self.vars.union_with(&other.vars);
         true
     }
+
+    fn render(&self, names: &Names) -> String {
+        format!(
+            "{}",
+            ListDisplay(
+                self.iter()
+                    .map(|x| format!("{:?}", names.get_var(x)))
+                    .collect::<Vec<_>>(),
+                ", "
+            )
+        )
+    }
 }
 
 /// The per-basic block state associated with the live variable analysis.
+#[derive(Debug)]
 pub(crate) struct LiveVariableState {
     /// The variables live on entry to a given basic block.
     pub(crate) live_in: VarSet,
@@ -168,6 +187,24 @@ pub(crate) struct LiveVariableState {
 pub(crate) struct LiveVariableAnalysis {
     pub(crate) intern: Names,
     analysis: HashMap<NodeIndex, LiveVariableState>,
+}
+
+impl fmt::Debug for LiveVariableAnalysis {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut map = f.debug_map();
+        for (node, state) in &self.analysis {
+            map.entry(
+                &node.index(),
+                &format!(
+                    "State {{ in: {}, out: {} }}",
+                    state.live_in.render(&self.intern),
+                    state.live_out.render(&self.intern)
+                ),
+            );
+        }
+        map.finish()?;
+        Ok(())
+    }
 }
 
 impl LiveVariableAnalysis {

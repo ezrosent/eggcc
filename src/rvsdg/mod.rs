@@ -33,6 +33,9 @@ pub(crate) mod from_cfg;
 pub(crate) mod live_variables;
 pub(crate) mod restructure;
 
+#[cfg(test)]
+mod tests;
+
 use bril_rs::{ConstOps, Literal, Type, ValueOps};
 use thiserror::Error;
 
@@ -75,6 +78,7 @@ pub(crate) enum Annotation {
 
 pub(crate) type Id = u32;
 
+#[derive(Debug)]
 pub(crate) enum Expr {
     Op(ValueOps, Vec<Operand>),
     Call(Identifier, Vec<Operand>),
@@ -91,6 +95,7 @@ pub(crate) enum Operand {
     Project(u16, Id),
 }
 
+#[derive(Debug)]
 pub(crate) enum RvsdgBody {
     PureOp(Expr),
     Gamma {
@@ -105,6 +110,7 @@ pub(crate) enum RvsdgBody {
     },
 }
 
+#[derive(Debug)]
 pub(crate) struct RvsdgFunction {
     /// The number of input arguments to the function.
     pub(crate) n_args: usize,

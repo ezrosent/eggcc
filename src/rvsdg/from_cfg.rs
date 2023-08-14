@@ -28,6 +28,8 @@ use super::{
 pub(crate) fn to_rvsdg(cfg: &mut Cfg) -> Result<RvsdgFunction> {
     cfg.restructure();
     let analysis = live_variables(cfg);
+    let please_remove = 1;
+    eprintln!("live variables: {:#?}", analysis);
     let dom = dominators::simple_fast(&cfg.graph, cfg.entry);
     let mut builder = RvsdgBuilder {
         cfg,
@@ -42,9 +44,12 @@ pub(crate) fn to_rvsdg(cfg: &mut Cfg) -> Result<RvsdgFunction> {
         builder.env.insert(arg_var, Operand::Arg(i as u32));
     }
 
-    let next = builder.try_loop(builder.cfg.entry)?;
-    if let Some(next) = next {
-        assert_eq!(next, builder.cfg.exit);
+    let mut cur = builder.cfg.entry;
+    while let Some(next) = builder.try_loop(cur)? {
+        if next == builder.cfg.exit {
+            break;
+        }
+        cur = next;
     }
     let result = if builder.cfg.has_return_value() {
         let ret_var = builder.analysis.intern.intern(ret_id());

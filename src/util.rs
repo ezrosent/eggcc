@@ -19,3 +19,16 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+/// Parse a string containing a bril program (in text format) into a Program.
+pub(crate) fn parse_from_string(input: &str) -> bril_rs::Program {
+    use bril2json::parse_abstract_program_from_read;
+    use bril_rs::load_program_from_read;
+    let abs_program = parse_abstract_program_from_read(input.as_bytes(), true, false, None);
+    let mut buf = Vec::new();
+    serde_json::to_writer_pretty(&mut buf, &abs_program).unwrap();
+    buf.push(b'\n');
+    let json_str = String::from_utf8(buf).unwrap();
+    load_program_from_read(json_str.as_bytes())
+}
