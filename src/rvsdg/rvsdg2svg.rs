@@ -493,12 +493,26 @@ impl Region {
     }
 }
 
-fn mk_node_and_input_edges(
-    body: &RvsdgBody,
-    index: usize,
-    other: &[RvsdgBody],
-) -> (Node, Vec<Edge>) {
-    let (node, operands): (Node, Vec<Operand>) = match body {
+impl Region {
+    fn to_svg(&self) -> String {
+        let (size, xml) = self.to_xml(false);
+        let svg = Xml::new(
+            "svg",
+            [
+                ("version", "1.1"),
+                ("width", &format!("{}", size.width)),
+                ("height", &format!("{}", size.height)),
+                ("xmlns", "http://www.w3.org/2000/svg"),
+            ],
+            &xml.to_string(),
+        );
+
+        svg.to_string()
+    }
+}
+
+fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) {
+    let (node, operands): (Node, Vec<Operand>) = match &nodes[index] {
         RvsdgBody::PureOp(Expr::Op(f, xs)) => {
             (Node::Unit(format!("{f}"), xs.len(), 1), xs.to_vec())
         }
@@ -524,7 +538,7 @@ fn mk_node_and_input_edges(
             Node::Match(
                 outputs
                     .iter()
-                    .map(|os| (String::new(), mk_region(os, other)))
+                    .map(|os| (String::new(), mk_region(None, os, nodes)))
                     .collect(),
             ),
             once(pred).chain(inputs).copied().collect::<Vec<_>>(),
@@ -535,8 +549,9 @@ fn mk_node_and_input_edges(
             outputs,
         } => (
             Node::Loop(mk_region(
+                None,
                 &once(pred).chain(outputs).copied().collect::<Vec<_>>(),
-                other,
+                nodes,
             )),
             inputs.to_vec(),
         ),
@@ -558,58 +573,76 @@ fn mk_node_and_input_edges(
     (node, input_edges)
 }
 
-impl Region {
-    fn to_svg(&self) -> String {
-        let (size, xml) = self.to_xml(false);
-        let svg = Xml::new(
-            "svg",
-            [
-                ("version", "1.1"),
-                ("width", &format!("{}", size.width)),
-                ("height", &format!("{}", size.height)),
-                ("xmlns", "http://www.w3.org/2000/svg"),
-            ],
-            &xml.to_string(),
-        );
+// returns only nodes in the SAME REGION as `from`
+// does traversals both up and down the tree
+fn reachable_nodes(reachable: &mut HashSet<usize>, all: &[RvsdgBody], from: Operand) {
+    for (i, node) in all.iter().enumerate() {
+        // make a set of inputs ports for this node
+        let mut operands = match node {
+            RvsdgBody::PureOp(Expr::Op(_, xs)) | RvsdgBody::PureOp(Expr::Call(_, xs)) => xs.clone(),
+            RvsdgBody::PureOp(Expr::Const(..)) => vec![],
+            RvsdgBody::Gamma { pred, inputs, .. } => once(pred).chain(inputs).copied().collect(),
+            RvsdgBody::Theta { inputs, .. } => inputs.clone(),
+        };
+        // go both directions by adding output ports
+        match node {
+            RvsdgBody::PureOp(..) => operands.push(Operand::Id(i as Id)),
+            RvsdgBody::Gamma { outputs, .. } => {
+                operands.extend((0..outputs[0].len()).map(|j| Operand::Project(j as u16, i as Id)))
+            }
+            RvsdgBody::Theta { outputs, .. } => {
+                operands.extend((0..outputs.len()).map(|j| Operand::Project(j as u16, i as Id)))
+            }
+        }
 
-        svg.to_string()
+        if operands.contains(&from) && reachable.insert(i) {
+            for operand in operands {
+                reachable_nodes(reachable, all, operand)
+            }
+        }
     }
 }
 
-fn mk_region(dsts: &[Operand], _nodes: &[RvsdgBody]) -> Region {
+fn mk_region(n_args: Option<usize>, dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
+    println!("{:?}", dsts);
+
+    let mut reachable = HashSet::new();
+    (0..n_args.unwrap_or(0))
+        .map(|i| Operand::Arg(i as u32))
+        .chain(dsts.iter().copied())
+        .for_each(|operand| {
+            reachable_nodes(&mut reachable, nodes, operand);
+        });
+
+    let (nodes, edges): (Vec<_>, Vec<_>) = reachable
+        .iter()
+        .map(|i| mk_node_and_input_edges(*i, nodes))
+        .unzip();
+    let edges = edges.concat();
+    let srcs = edges
+        .iter()
+        .filter_map(|((a, i), _)| match a {
+            None => Some(*i),
+            Some(_) => None,
+        })
+        .max()
+        .unwrap_or(0);
+
+    if let Some(n_args) = n_args {
+        assert_eq!(n_args, srcs);
+    }
+
     Region {
-        srcs: 0,
+        srcs,
         dsts: dsts.len(),
-        nodes: vec![],
-        edges: vec![],
+        nodes,
+        edges,
     }
 }
 
 impl RvsdgFunction {
     pub(crate) fn to_svg(&self) -> String {
-        let srcs = self.n_args;
-        let (nodes, edges): (Vec<_>, Vec<_>) = self
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(i, n)| mk_node_and_input_edges(n, i, &self.nodes))
-            .unzip();
-        let edges = edges.concat();
-        let dsts = edges
-            .iter()
-            .filter_map(|(_, (b, j))| match b {
-                None => Some(*j),
-                Some(_) => None,
-            })
-            .max()
-            .unwrap_or(0);
-        Region {
-            srcs,
-            dsts,
-            nodes,
-            edges,
-        }
-        .to_svg()
+        mk_region(Some(self.n_args), &[], &self.nodes).to_svg()
     }
 }
 
@@ -726,8 +759,8 @@ mod tests {
         }
         .to_svg();
 
-        std::fs::write("../../../target/rvsdg2svg_basic_old.svg", &svg_old).unwrap();
-        std::fs::write("../../../target/rvsdg2svg_basic_gen.svg", &svg_gen).unwrap();
+        std::fs::write("target/rvsdg2svg_basic_old.svg", &svg_old).unwrap();
+        std::fs::write("target/rvsdg2svg_basic_gen.svg", &svg_gen).unwrap();
         assert_eq!(svg_old, svg_gen);
     }
 }
