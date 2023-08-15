@@ -557,6 +557,24 @@ fn mk_node_and_input_edges(
     (node, input_edges)
 }
 
+impl Region {
+    fn to_svg(&self) -> String {
+        let (size, xml) = self.to_xml(false);
+        let svg = Xml::new(
+            "svg",
+            [
+                ("version", "1.1"),
+                ("width", &format!("{}", size.width)),
+                ("height", &format!("{}", size.height)),
+                ("xmlns", "http://www.w3.org/2000/svg"),
+            ],
+            &xml.to_string(),
+        );
+
+        svg.to_string()
+    }
+}
+
 fn mk_region(_dsts: &[Operand], _nodes: &[RvsdgBody]) -> Region {
     Region {
         srcs: 0,
@@ -567,7 +585,7 @@ fn mk_region(_dsts: &[Operand], _nodes: &[RvsdgBody]) -> Region {
 }
 
 impl RvsdgFunction {
-    pub(crate) fn to_svg(&self, path: &str) {
+    pub(crate) fn to_svg(&self) -> String {
         let srcs = self.n_args;
         let (nodes, edges): (Vec<_>, Vec<_>) = self
             .nodes
@@ -584,25 +602,131 @@ impl RvsdgFunction {
             })
             .max()
             .unwrap_or(0);
-
-        let (size, xml) = Region {
+        Region {
             srcs,
             dsts,
             nodes,
             edges,
         }
-        .to_xml(false);
-        let svg = Xml::new(
-            "svg",
-            [
-                ("version", "1.1"),
-                ("width", &format!("{}", size.width)),
-                ("height", &format!("{}", size.height)),
-                ("xmlns", "http://www.w3.org/2000/svg"),
-            ],
-            &xml.to_string(),
-        );
+        .to_svg()
+    }
+}
 
-        std::fs::write(path, svg.to_string()).unwrap();
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rvsdg2svg_basic() {
+        let svg_old = Region {
+            srcs: 2,
+            dsts: 2,
+            nodes: vec![
+                Node::Match(vec![
+                    (
+                        "0".to_owned(),
+                        Region {
+                            srcs: 2,
+                            dsts: 1,
+                            nodes: vec![Node::Unit("0".to_owned(), 0, 1)],
+                            edges: vec![((Some(0), 0), (None, 0))],
+                        },
+                    ),
+                    (
+                        "else".to_owned(),
+                        Region {
+                            srcs: 2,
+                            dsts: 1,
+                            nodes: vec![Node::Unit("+".to_owned(), 2, 1)],
+                            edges: vec![
+                                ((None, 0), (Some(0), 0)),
+                                ((None, 1), (Some(0), 1)),
+                                ((Some(0), 0), (None, 0)),
+                            ],
+                        },
+                    ),
+                ]),
+                Node::Loop(Region {
+                    srcs: 3,
+                    dsts: 4,
+                    nodes: vec![
+                        Node::Unit("+".to_owned(), 2, 1),
+                        Node::Unit("1".to_owned(), 0, 1),
+                        Node::Unit("5".to_owned(), 0, 1),
+                        Node::Unit("*".to_owned(), 2, 1),
+                        Node::Unit("+".to_owned(), 2, 1),
+                        Node::Unit("=".to_owned(), 2, 1),
+                    ],
+                    edges: vec![
+                        ((None, 0), (Some(0), 0)),
+                        ((Some(1), 0), (Some(0), 1)),
+                        ((None, 0), (Some(3), 0)),
+                        ((Some(2), 0), (Some(3), 1)),
+                        ((Some(2), 0), (Some(4), 0)),
+                        ((None, 2), (Some(4), 1)),
+                        ((Some(5), 0), (None, 0)),
+                        ((Some(0), 0), (None, 1)),
+                        ((Some(3), 0), (None, 2)),
+                        ((Some(4), 0), (None, 3)),
+                        ((Some(0), 0), (Some(5), 0)),
+                        ((Some(2), 0), (Some(5), 1)),
+                    ],
+                }),
+            ],
+            edges: vec![
+                ((None, 0), (Some(0), 0)),
+                ((None, 0), (Some(0), 1)),
+                ((None, 1), (Some(0), 2)),
+                ((Some(0), 0), (None, 0)),
+                ((Some(1), 1), (None, 1)),
+                ((Some(1), 2), (None, 1)),
+            ],
+        }
+        .to_svg();
+
+        let svg_gen = RvsdgFunction {
+            n_args: 3,
+            nodes: vec![
+                RvsdgBody::PureOp(Expr::Const(ConstOps::Const, Type::Int, Literal::Int(0))),
+                RvsdgBody::PureOp(Expr::Op(
+                    ValueOps::Add,
+                    vec![Operand::Arg(0), Operand::Arg(1)],
+                )),
+                RvsdgBody::Gamma {
+                    pred: Operand::Arg(0),
+                    inputs: vec![Operand::Arg(0), Operand::Arg(1)],
+                    outputs: vec![vec![Operand::Id(0)], vec![Operand::Id(1)]],
+                },
+                RvsdgBody::PureOp(Expr::Op(
+                    ValueOps::Add,
+                    vec![Operand::Arg(0), Operand::Id(4)],
+                )),
+                RvsdgBody::PureOp(Expr::Const(ConstOps::Const, Type::Int, Literal::Int(1))),
+                RvsdgBody::PureOp(Expr::Const(ConstOps::Const, Type::Int, Literal::Int(5))),
+                RvsdgBody::PureOp(Expr::Op(
+                    ValueOps::Mul,
+                    vec![Operand::Arg(0), Operand::Id(5)],
+                )),
+                RvsdgBody::PureOp(Expr::Op(
+                    ValueOps::Add,
+                    vec![Operand::Id(5), Operand::Arg(2)],
+                )),
+                RvsdgBody::PureOp(Expr::Op(
+                    ValueOps::Add,
+                    vec![Operand::Id(3), Operand::Id(5)],
+                )),
+                RvsdgBody::Theta {
+                    pred: Operand::Id(8),
+                    inputs: vec![],
+                    outputs: vec![Operand::Id(3), Operand::Id(6), Operand::Id(7)],
+                },
+            ],
+            result: None,
+        }
+        .to_svg();
+
+        std::fs::write("../../../target/rvsdg2svg_basic_old.svg", &svg_old).unwrap();
+        std::fs::write("../../../target/rvsdg2svg_basic_gen.svg", &svg_gen).unwrap();
+        assert_eq!(svg_old, svg_gen);
     }
 }
