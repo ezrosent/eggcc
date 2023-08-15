@@ -603,8 +603,6 @@ fn reachable_nodes(reachable: &mut HashSet<usize>, all: &[RvsdgBody], from: Oper
 }
 
 fn mk_region(dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
-    println!("{:?}", dsts);
-
     let mut reachable = HashSet::new();
     dsts.iter().for_each(|operand| {
         reachable_nodes(&mut reachable, nodes, *operand);
@@ -634,7 +632,8 @@ fn mk_region(dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
 
 impl RvsdgFunction {
     pub(crate) fn to_svg(&self) -> String {
-        mk_region(&[], &self.nodes).to_svg()
+        let dsts: Vec<_> = self.result.iter().copied().collect();
+        mk_region(&dsts, &self.nodes).to_svg()
     }
 }
 
@@ -646,7 +645,7 @@ mod tests {
     fn rvsdg2svg_basic() {
         let svg_old = Region {
             srcs: 2,
-            dsts: 2,
+            dsts: 1,
             nodes: vec![
                 Node::Match(vec![
                     (
@@ -698,14 +697,16 @@ mod tests {
                         ((Some(2), 0), (Some(5), 1)),
                     ],
                 }),
+                Node::Unit("+".to_owned(), 2, 1),
             ],
             edges: vec![
                 ((None, 0), (Some(0), 0)),
                 ((None, 0), (Some(0), 1)),
                 ((None, 1), (Some(0), 2)),
-                ((Some(0), 0), (None, 0)),
-                ((Some(1), 1), (None, 1)),
-                ((Some(1), 2), (None, 1)),
+                ((Some(0), 0), (Some(2), 0)),
+                ((Some(1), 0), (Some(2), 1)),
+                ((Some(1), 1), (Some(2), 1)),
+                ((Some(2), 0), (None, 0)),
             ],
         }
         .to_svg();
@@ -746,8 +747,12 @@ mod tests {
                     inputs: vec![],
                     outputs: vec![Operand::Id(3), Operand::Id(6), Operand::Id(7)],
                 },
+                RvsdgBody::PureOp(Expr::Op(
+                    ValueOps::Add,
+                    vec![Operand::Id(2), Operand::Id(9)],
+                )),
             ],
-            result: None,
+            result: Some(Operand::Id(10)),
         }
         .to_svg();
 
