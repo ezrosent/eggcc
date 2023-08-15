@@ -319,13 +319,16 @@ impl Node {
 
 impl Region {
     fn to_xml(&self, in_loop: bool) -> (Size, Xml) {
+        let mut edges = self.edges.clone();
+        edges.sort();
+
         let mut children: BTreeMap<_, _> = self.nodes.iter().map(|t| (t.0, t.1.to_xml())).collect();
 
         let mut layers: Vec<Vec<Id>> = vec![];
         let mut to_order: BTreeSet<Id> = self.nodes.keys().copied().collect();
         while !to_order.is_empty() {
             let mut next_layer = to_order.clone();
-            for ((a, _), (b, _)) in &self.edges {
+            for ((a, _), (b, _)) in &edges {
                 if let (Some(a), Some(b)) = (a, b) {
                     if to_order.contains(b) {
                         next_layer.remove(a);
@@ -380,7 +383,7 @@ impl Region {
         assert_eq!(w, size.width);
         assert_eq!(h, size.height);
 
-        let edges = Xml::group(self.edges.iter().map(|((a, i), (b, j))| {
+        let edges = Xml::group(edges.iter().map(|((a, i), (b, j))| {
             let (a_x, a_y) = match a {
                 None => (blend(size.width, self.srcs, *i), 0.0),
                 Some(a) => (
@@ -749,8 +752,6 @@ mod tests {
         }
         .to_svg();
 
-        std::fs::write("target/rvsdg2svg_basic_old.svg", &svg_old).unwrap();
-        std::fs::write("target/rvsdg2svg_basic_new.svg", &svg_new).unwrap();
         assert_eq!(svg_old, svg_new);
     }
 }
