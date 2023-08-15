@@ -597,7 +597,18 @@ fn mk_region(srcs: usize, dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
             ((*i, node), edges)
         })
         .unzip();
-    let edges = edges.concat();
+    let mut edges = edges.concat();
+    // add edges to dsts
+    edges.extend(dsts.iter().enumerate().map(|(j, x)| {
+        (
+            match x {
+                Operand::Arg(i) => (None, *i),
+                Operand::Id(id) => (Some(*id), 0),
+                Operand::Project(i, id) => (Some(*id), *i),
+            },
+            (None, j),
+        )
+    }));
 
     Region {
         srcs,
@@ -726,7 +737,7 @@ mod tests {
                 RvsdgBody::PureOp(Expr::Op(ValueOps::Eq, vec![Operand::Id(3), Operand::Id(5)])),
                 RvsdgBody::Theta {
                     pred: Operand::Id(8),
-                    inputs: vec![],
+                    inputs: vec![Operand::Arg(0), Operand::Arg(1), Operand::Arg(0)],
                     outputs: vec![Operand::Id(3), Operand::Id(6), Operand::Id(7)],
                 },
                 RvsdgBody::PureOp(Expr::Op(
