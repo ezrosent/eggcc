@@ -384,20 +384,16 @@ impl Region {
             let (a_x, a_y) = match a {
                 None => (blend(size.width, self.srcs, *i), 0.0),
                 Some(a) => (
-                    positions[a].0 + self.nodes[a].outputs(children[&a].0.width)[*i as usize],
+                    positions[a].0 + self.nodes[a].outputs(children[&a].0.width)[*i],
                     positions[a].1 + children[&a].0.height,
                 ),
             };
             let (b_x, b_y) = match b {
                 None => (blend(size.width, self.dsts, *j), size.height),
-                Some(b) => {
-                    println!("{:?}", ((a, i), (b, j)));
-                    println!("{:?} {:?}", self.nodes[b].inputs(children[b].0.width), j);
-                    (
-                        positions[b].0 + self.nodes[b].inputs(children[b].0.width)[*j as usize],
-                        positions[b].1,
-                    )
-                }
+                Some(b) => (
+                    positions[b].0 + self.nodes[b].inputs(children[b].0.width)[*j],
+                    positions[b].1,
+                ),
             };
 
             let break_y = match a {
@@ -506,7 +502,7 @@ impl Region {
 }
 
 fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) {
-    let (node, operands): (Node, Vec<Operand>) = match &nodes[index as usize] {
+    let (node, operands): (Node, Vec<Operand>) = match &nodes[index] {
         RvsdgBody::PureOp(Expr::Op(f, xs)) => {
             (Node::Unit(format!("{f}"), xs.len(), 1), xs.to_vec())
         }
@@ -532,7 +528,7 @@ fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) 
             Node::Match(
                 outputs
                     .iter()
-                    .map(|os| (String::new(), mk_region(_, os, nodes)))
+                    .map(|os| (String::new(), mk_region(1 + inputs.len(), os, nodes)))
                     .collect(),
             ),
             once(pred).chain(inputs).copied().collect::<Vec<_>>(),
@@ -543,7 +539,7 @@ fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) 
             outputs,
         } => (
             Node::Loop(mk_region(
-                _,
+                inputs.len(),
                 &once(pred).chain(outputs).copied().collect::<Vec<_>>(),
                 nodes,
             )),
@@ -575,7 +571,7 @@ fn reachable_nodes(reachable: &mut HashSet<Id>, all: &[RvsdgBody], output: Opera
         Operand::Project(_, id) => id,
     };
     if reachable.insert(id) {
-        let inputs = match &all[id as usize] {
+        let inputs = match &all[id] {
             RvsdgBody::PureOp(Expr::Op(_, xs)) | RvsdgBody::PureOp(Expr::Call(_, xs)) => xs.clone(),
             RvsdgBody::PureOp(Expr::Const(..)) => vec![],
             RvsdgBody::Gamma { pred, inputs, .. } => once(pred).chain(inputs).copied().collect(),
