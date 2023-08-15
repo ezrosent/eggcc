@@ -32,9 +32,7 @@
 pub(crate) mod from_cfg;
 pub(crate) mod live_variables;
 pub(crate) mod restructure;
-
-#[cfg(test)]
-mod tests;
+pub(crate) mod rvsdg2svg;
 
 use bril_rs::{ConstOps, Literal, Type, ValueOps};
 use thiserror::Error;
