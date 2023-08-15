@@ -319,7 +319,7 @@ impl Node {
 
 impl Region {
     fn to_xml(&self, in_loop: bool) -> (Size, Xml) {
-        let children: HashMap<_, _> = self.nodes.iter().map(|t| (t.0, t.1.to_xml())).collect();
+        let mut children: HashMap<_, _> = self.nodes.iter().map(|t| (t.0, t.1.to_xml())).collect();
 
         let mut layers: Vec<Vec<Id>> = vec![];
         let mut to_order: HashSet<Id> = self.nodes.keys().copied().collect();
@@ -360,7 +360,7 @@ impl Region {
 
         let mut w = NODE_SPACING;
         let mut h = NODE_SPACING;
-        let mut positions: HashMap<Id, (f32, f32)> = layers
+        let positions: HashMap<Id, (f32, f32)> = layers
             .iter()
             .zip(sizes)
             .rev()
@@ -384,19 +384,16 @@ impl Region {
             let (a_x, a_y) = match a {
                 None => (blend(size.width, self.srcs, *i), 0.0),
                 Some(a) => (
-                    positions[a].0 + self.nodes[&a].outputs(children[&a].0.width)[*i as usize],
+                    positions[a].0 + self.nodes[a].outputs(children[&a].0.width)[*i as usize],
                     positions[a].1 + children[&a].0.height,
                 ),
             };
             let (b_x, b_y) = match b {
                 None => (blend(size.width, self.dsts, *j), size.height),
-                Some(b) => {
-                    println!("{:#?} {:?}", self.nodes, ((a, i), (b, j)));
-                    (
-                        positions[b].0 + self.nodes[b].inputs(children[b].0.width)[*j as usize],
-                        positions[b].1,
-                    )
-                }
+                Some(b) => (
+                    positions[b].0 + self.nodes[b].inputs(children[b].0.width)[*j as usize],
+                    positions[b].1,
+                ),
             };
 
             let break_y = match a {
@@ -463,11 +460,10 @@ impl Region {
         let dsts = Xml::group((0..d).map(|p| port(blend(size.width, d, p), size.height, c(p))));
 
         let nodes = Xml::group(positions.iter().map(|(id, (x, y))| {
-            children[id]
-                .1
-                .attributes
+            let (_, mut xml) = children.remove(id).unwrap();
+            xml.attributes
                 .insert("transform".to_owned(), format!("translate({x}, {y})"));
-            children[id].1
+            xml
         }));
 
         let background = Xml::new(
@@ -505,8 +501,8 @@ impl Region {
     }
 }
 
-fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) {
-    let (node, operands): (Node, Vec<Operand>) = match &nodes[index] {
+fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) {
+    let (node, operands): (Node, Vec<Operand>) = match &nodes[index as usize] {
         RvsdgBody::PureOp(Expr::Op(f, xs)) => {
             (Node::Unit(format!("{f}"), xs.len() as u32, 1), xs.to_vec())
         }
@@ -559,7 +555,7 @@ fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge
                     Operand::Id(id) => (Some(*id), 0),
                     Operand::Project(i, id) => (Some(*id), *i),
                 },
-                (Some(index), j),
+                (Some(index), j as u32),
             )
         })
         .collect();
@@ -567,15 +563,14 @@ fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge
 }
 
 // returns only nodes in the same REGION as `output`
-fn reachable_nodes(reachable: &mut HashSet<usize>, all: &[RvsdgBody], output: Operand) {
+fn reachable_nodes(reachable: &mut HashSet<Id>, all: &[RvsdgBody], output: Operand) {
     let id = match output {
         Operand::Arg(..) => return,
         Operand::Id(id) => id,
         Operand::Project(_, id) => id,
     };
-    let id = id as usize;
     if reachable.insert(id) {
-        let inputs = match &all[id] {
+        let inputs = match &all[id as usize] {
             RvsdgBody::PureOp(Expr::Op(_, xs)) | RvsdgBody::PureOp(Expr::Call(_, xs)) => xs.clone(),
             RvsdgBody::PureOp(Expr::Const(..)) => vec![],
             RvsdgBody::Gamma { pred, inputs, .. } => once(pred).chain(inputs).copied().collect(),
@@ -593,9 +588,12 @@ fn mk_region(dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
         reachable_nodes(&mut reachable, nodes, *operand);
     });
 
-    let (nodes, edges): (Vec<_>, Vec<_>) = reachable
+    let (nodes, edges): (HashMap<_, _>, Vec<_>) = reachable
         .iter()
-        .map(|i| mk_node_and_input_edges(*i, nodes))
+        .map(|i| {
+            let (node, edges) = mk_node_and_input_edges(*i, nodes);
+            ((*i, node), edges)
+        })
         .unzip();
     let edges = edges.concat();
     let srcs = edges
@@ -609,7 +607,7 @@ fn mk_region(dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
 
     Region {
         srcs,
-        dsts: dsts.len(),
+        dsts: dsts.len() as u32,
         nodes,
         edges,
     }
@@ -631,59 +629,65 @@ mod tests {
         let svg_old = Region {
             srcs: 2,
             dsts: 1,
-            nodes: vec![
-                Node::Match(vec![
-                    (
-                        "0".to_owned(),
-                        Region {
-                            srcs: 2,
-                            dsts: 1,
-                            nodes: vec![Node::Unit("0".to_owned(), 0, 1)],
-                            edges: vec![((Some(0), 0), (None, 0))],
-                        },
-                    ),
-                    (
-                        "else".to_owned(),
-                        Region {
-                            srcs: 2,
-                            dsts: 1,
-                            nodes: vec![Node::Unit("+".to_owned(), 2, 1)],
-                            edges: vec![
-                                ((None, 0), (Some(0), 0)),
-                                ((None, 1), (Some(0), 1)),
-                                ((Some(0), 0), (None, 0)),
-                            ],
-                        },
-                    ),
-                ]),
-                Node::Loop(Region {
-                    srcs: 3,
-                    dsts: 4,
-                    nodes: vec![
-                        Node::Unit("+".to_owned(), 2, 1),
-                        Node::Unit("1".to_owned(), 0, 1),
-                        Node::Unit("5".to_owned(), 0, 1),
-                        Node::Unit("*".to_owned(), 2, 1),
-                        Node::Unit("+".to_owned(), 2, 1),
-                        Node::Unit("=".to_owned(), 2, 1),
-                    ],
-                    edges: vec![
-                        ((None, 0), (Some(0), 0)),
-                        ((Some(1), 0), (Some(0), 1)),
-                        ((None, 0), (Some(3), 0)),
-                        ((Some(2), 0), (Some(3), 1)),
-                        ((Some(2), 0), (Some(4), 0)),
-                        ((None, 2), (Some(4), 1)),
-                        ((Some(5), 0), (None, 0)),
-                        ((Some(0), 0), (None, 1)),
-                        ((Some(3), 0), (None, 2)),
-                        ((Some(4), 0), (None, 3)),
-                        ((Some(0), 0), (Some(5), 0)),
-                        ((Some(2), 0), (Some(5), 1)),
-                    ],
-                }),
-                Node::Unit("+".to_owned(), 2, 1),
-            ],
+            nodes: HashMap::from([
+                (
+                    0,
+                    Node::Match(vec![
+                        (
+                            "0".to_owned(),
+                            Region {
+                                srcs: 2,
+                                dsts: 1,
+                                nodes: HashMap::from([(0, Node::Unit("0".to_owned(), 0, 1))]),
+                                edges: vec![((Some(0), 0), (None, 0))],
+                            },
+                        ),
+                        (
+                            "else".to_owned(),
+                            Region {
+                                srcs: 2,
+                                dsts: 1,
+                                nodes: HashMap::from([(0, Node::Unit("+".to_owned(), 2, 1))]),
+                                edges: vec![
+                                    ((None, 0), (Some(0), 0)),
+                                    ((None, 1), (Some(0), 1)),
+                                    ((Some(0), 0), (None, 0)),
+                                ],
+                            },
+                        ),
+                    ]),
+                ),
+                (
+                    1,
+                    Node::Loop(Region {
+                        srcs: 3,
+                        dsts: 4,
+                        nodes: HashMap::from([
+                            (0, Node::Unit("+".to_owned(), 2, 1)),
+                            (1, Node::Unit("1".to_owned(), 0, 1)),
+                            (2, Node::Unit("5".to_owned(), 0, 1)),
+                            (3, Node::Unit("*".to_owned(), 2, 1)),
+                            (4, Node::Unit("+".to_owned(), 2, 1)),
+                            (5, Node::Unit("=".to_owned(), 2, 1)),
+                        ]),
+                        edges: vec![
+                            ((None, 0), (Some(0), 0)),
+                            ((Some(1), 0), (Some(0), 1)),
+                            ((None, 0), (Some(3), 0)),
+                            ((Some(2), 0), (Some(3), 1)),
+                            ((Some(2), 0), (Some(4), 0)),
+                            ((None, 2), (Some(4), 1)),
+                            ((Some(5), 0), (None, 0)),
+                            ((Some(0), 0), (None, 1)),
+                            ((Some(3), 0), (None, 2)),
+                            ((Some(4), 0), (None, 3)),
+                            ((Some(0), 0), (Some(5), 0)),
+                            ((Some(2), 0), (Some(5), 1)),
+                        ],
+                    }),
+                ),
+                (2, Node::Unit("+".to_owned(), 2, 1)),
+            ]),
             edges: vec![
                 ((None, 0), (Some(0), 0)),
                 ((None, 0), (Some(0), 1)),
