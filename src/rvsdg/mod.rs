@@ -90,7 +90,7 @@ pub(crate) enum Operand {
     /// Another node in the RVSDG.
     Id(Id),
     /// Project a single output from a multi-output region.
-    Project(u16, Id),
+    Project(u32, Id),
 }
 
 #[derive(Debug)]

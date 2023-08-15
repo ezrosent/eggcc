@@ -12,15 +12,15 @@ const REGION_SPACING: f32 = NODE_SPACING * 0.5;
 
 #[derive(Debug)]
 struct Region {
-    srcs: usize,
-    dsts: usize,
-    nodes: Vec<Node>,
+    srcs: u32,
+    dsts: u32,
+    nodes: HashMap<Id, Node>,
     edges: Vec<Edge>,
 }
 
 #[derive(Debug)]
 enum Node {
-    Unit(String, usize, usize),
+    Unit(String, u32, u32),
     Match(Vec<(String, Region)>), // vec must be nonempty
     Loop(Region),
 }
@@ -28,7 +28,7 @@ enum Node {
 // Each edge goes from an output port to an input port.
 // `None` refers to the region, `Some(i)` refers to the node at index `i`.
 // The second number is the index of the port that is being referred to.
-type Edge = ((Option<usize>, usize), (Option<usize>, usize));
+type Edge = ((Option<Id>, u32), (Option<Id>, u32));
 
 struct Size {
     width: f32,
@@ -85,7 +85,7 @@ impl ToString for Xml {
     }
 }
 
-fn blend(width: f32, total: usize, index: usize) -> f32 {
+fn blend(width: f32, total: u32, index: u32) -> f32 {
     width / ((total + 1) as f32) * (index + 1) as f32
 }
 
@@ -319,10 +319,10 @@ impl Node {
 
 impl Region {
     fn to_xml(&self, in_loop: bool) -> (Size, Xml) {
-        let children: Vec<_> = self.nodes.iter().map(Node::to_xml).collect();
+        let children: HashMap<_, _> = self.nodes.iter().map(|t| (t.0, t.1.to_xml())).collect();
 
-        let mut layers: Vec<Vec<usize>> = vec![];
-        let mut to_order: HashSet<usize> = (0..children.len()).collect();
+        let mut layers: Vec<Vec<Id>> = vec![];
+        let mut to_order: HashSet<Id> = self.nodes.keys().copied().collect();
         while !to_order.is_empty() {
             let mut next_layer = to_order.clone();
             for ((a, _), (b, _)) in &self.edges {
@@ -334,7 +334,7 @@ impl Region {
             }
             to_order.retain(|node| !next_layer.contains(node));
 
-            let mut next_layer: Vec<usize> = next_layer.into_iter().collect();
+            let mut next_layer: Vec<Id> = next_layer.into_iter().collect();
             next_layer.sort(); // determinism
             layers.push(next_layer);
         }
@@ -342,13 +342,10 @@ impl Region {
         let sizes: Vec<Size> = layers
             .iter()
             .map(|layer| Size {
-                width: layer
-                    .iter()
-                    .map(|node| children[*node].0.width)
-                    .sum::<f32>(),
+                width: layer.iter().map(|node| children[node].0.width).sum::<f32>(),
                 height: layer
                     .iter()
-                    .map(|node| children[*node].0.height)
+                    .map(|node| children[node].0.height)
                     .max_by(f32::total_cmp)
                     .unwrap(),
             })
@@ -363,7 +360,7 @@ impl Region {
 
         let mut w = NODE_SPACING;
         let mut h = NODE_SPACING;
-        let mut positions: Vec<(usize, (f32, f32))> = layers
+        let mut positions: HashMap<Id, (f32, f32)> = layers
             .iter()
             .zip(sizes)
             .rev()
@@ -372,7 +369,7 @@ impl Region {
                     .iter()
                     .map(|node| {
                         let out = (*node, (w, h));
-                        w += children[*node].0.width + NODE_SPACING;
+                        w += children[node].0.width + NODE_SPACING;
                         out
                     })
                     .collect();
@@ -383,23 +380,23 @@ impl Region {
         assert_eq!(w, size.width);
         assert_eq!(h, size.height);
 
-        positions.sort_by_key(|t| t.0);
-        let positions: Vec<_> = positions.into_iter().map(|t| t.1).collect();
-
         let edges = Xml::group(self.edges.iter().map(|((a, i), (b, j))| {
-            let (a_x, a_y) = match *a {
+            let (a_x, a_y) = match a {
                 None => (blend(size.width, self.srcs, *i), 0.0),
                 Some(a) => (
-                    positions[a].0 + self.nodes[a].outputs(children[a].0.width)[*i],
-                    positions[a].1 + children[a].0.height,
+                    positions[a].0 + self.nodes[&a].outputs(children[&a].0.width)[*i as usize],
+                    positions[a].1 + children[&a].0.height,
                 ),
             };
-            let (b_x, b_y) = match *b {
+            let (b_x, b_y) = match b {
                 None => (blend(size.width, self.dsts, *j), size.height),
-                Some(b) => (
-                    positions[b].0 + self.nodes[b].inputs(children[b].0.width)[*j],
-                    positions[b].1,
-                ),
+                Some(b) => {
+                    println!("{:#?} {:?}", self.nodes, ((a, i), (b, j)));
+                    (
+                        positions[b].0 + self.nodes[b].inputs(children[b].0.width)[*j as usize],
+                        positions[b].1,
+                    )
+                }
             };
 
             let break_y = match a {
@@ -412,15 +409,15 @@ impl Region {
                     let layer = layers.iter().find(|layer| layer.contains(a)).unwrap();
                     let total = layer
                         .iter()
-                        .map(|node| self.nodes[*node].outputs(0.0).len())
-                        .sum::<usize>();
+                        .map(|node| self.nodes[node].outputs(0.0).len() as u32)
+                        .sum();
                     let mut index = 0;
                     for node in layer.iter().rev() {
                         if node == a {
                             index += *i;
                             break;
                         }
-                        index += self.nodes[*node].outputs(0.0).len();
+                        index += self.nodes[node].outputs(0.0).len() as u32;
                     }
                     a_y + CORNER_RADIUS + blend(NODE_SPACING - CORNER_RADIUS * 2.0, total, index)
                 }
@@ -465,16 +462,13 @@ impl Region {
         let srcs = Xml::group((0..s).map(|p| port(blend(size.width, s, p), 0.0, "white")));
         let dsts = Xml::group((0..d).map(|p| port(blend(size.width, d, p), size.height, c(p))));
 
-        let nodes = Xml::group(
-            positions
-                .iter()
-                .zip(children)
-                .map(|((x, y), (_, mut xml))| {
-                    xml.attributes
-                        .insert("transform".to_owned(), format!("translate({x}, {y})"));
-                    xml
-                }),
-        );
+        let nodes = Xml::group(positions.iter().map(|(id, (x, y))| {
+            children[id]
+                .1
+                .attributes
+                .insert("transform".to_owned(), format!("translate({x}, {y})"));
+            children[id].1
+        }));
 
         let background = Xml::new(
             "rect",
@@ -514,7 +508,7 @@ impl Region {
 fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) {
     let (node, operands): (Node, Vec<Operand>) = match &nodes[index] {
         RvsdgBody::PureOp(Expr::Op(f, xs)) => {
-            (Node::Unit(format!("{f}"), xs.len(), 1), xs.to_vec())
+            (Node::Unit(format!("{f}"), xs.len() as u32, 1), xs.to_vec())
         }
         RvsdgBody::PureOp(Expr::Call(f, xs)) => (
             Node::Unit(
@@ -522,7 +516,7 @@ fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge
                     Identifier::Name(s) => (**s).to_owned(),
                     Identifier::Num(x) => format!("{x}"),
                 },
-                xs.len(),
+                xs.len() as u32,
                 1,
             ),
             xs.to_vec(),
@@ -561,9 +555,9 @@ fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge
         .map(|(j, x)| {
             (
                 match x {
-                    Operand::Arg(i) => (None, *i as usize),
-                    Operand::Id(id) => (Some(*id as usize), 0),
-                    Operand::Project(i, id) => (Some(*id as usize), *i as usize),
+                    Operand::Arg(i) => (None, *i),
+                    Operand::Id(id) => (Some(*id), 0),
+                    Operand::Project(i, id) => (Some(*id), *i),
                 },
                 (Some(index), j),
             )

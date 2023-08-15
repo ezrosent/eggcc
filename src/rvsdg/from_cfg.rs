@@ -206,7 +206,7 @@ impl<'a> RvsdgBuilder<'a> {
         let live_vars = self.analysis.var_state(block).unwrap();
         for (i, var) in live_vars.live_out.iter().enumerate() {
             self.env
-                .insert(var, Operand::Project(u16::try_from(i).unwrap(), theta_node));
+                .insert(var, Operand::Project(u32::try_from(i).unwrap(), theta_node));
         }
         Ok(self
             .cfg
@@ -322,7 +322,7 @@ impl<'a> RvsdgBuilder<'a> {
             .enumerate()
         {
             self.env
-                .insert(var, Operand::Project(u16::try_from(i).unwrap(), gamma_node));
+                .insert(var, Operand::Project(u32::try_from(i).unwrap(), gamma_node));
         }
 
         Ok(Some(next))
