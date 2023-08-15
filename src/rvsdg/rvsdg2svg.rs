@@ -1,5 +1,6 @@
 use crate::rvsdg::*;
 use std::collections::{HashMap, HashSet};
+use std::iter::once;
 
 const SIMPLE_NODE_SIZE: f32 = 100.0;
 const STROKE_WIDTH: f32 = SIMPLE_NODE_SIZE * 0.02;
@@ -169,7 +170,7 @@ impl Node {
                     .outputs(size.width)
                     .into_iter()
                     .map(|x| port(x, size.height, "white"));
-                let group = Xml::group(std::iter::once(node).chain(inputs).chain(outputs));
+                let group = Xml::group(once(node).chain(inputs).chain(outputs));
                 (size, group)
             }
             Node::Match(branches) => {
@@ -490,34 +491,89 @@ impl Region {
     }
 }
 
-impl RvsdgBody {
-    fn to_node(&self, other: &[RvsdgBody]) -> (Node, Vec<Edge>) {
+impl Operand {
+    fn to_point(self) -> (Option<usize>, usize) {
         match self {
-            RvsdgBody::PureOp(Expr::Op(_, _)) => todo!(),
-            RvsdgBody::PureOp(Expr::Call(_, _)) => todo!(),
-            RvsdgBody::PureOp(Expr::Const(_, _, _)) => todo!(),
-            RvsdgBody::Gamma {
-                pred: _,
-                inputs: _,
-                outputs: _,
-            } => todo!(),
-            RvsdgBody::Theta {
-                pred: _,
-                inputs: _,
-                outputs: _,
-            } => todo!(),
+            Operand::Arg(i) => (None, i as usize),
+            Operand::Id(id) => (Some(id as usize), 0),
+            Operand::Project(i, id) => (Some(id as usize), i as usize),
         }
+    }
+}
+
+fn mk_node_and_input_edges(
+    body: &RvsdgBody,
+    index: usize,
+    other: &[RvsdgBody],
+) -> (Node, Vec<Edge>) {
+    let (node, operands): (Node, Vec<Operand>) = match body {
+        RvsdgBody::PureOp(Expr::Op(f, xs)) => {
+            (Node::Unit(format!("{f}"), xs.len(), 1), xs.to_vec())
+        }
+        RvsdgBody::PureOp(Expr::Call(f, xs)) => (
+            Node::Unit(
+                match f {
+                    Identifier::Name(s) => (**s).to_owned(),
+                    Identifier::Num(x) => format!("{x}"),
+                },
+                xs.len(),
+                1,
+            ),
+            xs.to_vec(),
+        ),
+        RvsdgBody::PureOp(Expr::Const(ConstOps::Const, _, v)) => {
+            (Node::Unit(format!("{v}"), 0, 0), vec![])
+        }
+        RvsdgBody::Gamma {
+            pred,
+            inputs,
+            outputs,
+        } => (
+            Node::Match(
+                outputs
+                    .iter()
+                    .map(|os| (String::new(), mk_region(os, other)))
+                    .collect(),
+            ),
+            once(pred).chain(inputs).copied().collect::<Vec<_>>(),
+        ),
+        RvsdgBody::Theta {
+            pred,
+            inputs,
+            outputs,
+        } => (
+            Node::Loop(mk_region(
+                &once(pred).chain(outputs).copied().collect::<Vec<_>>(),
+                other,
+            )),
+            inputs.to_vec(),
+        ),
+    };
+    let input_edges = operands
+        .iter()
+        .enumerate()
+        .map(|(j, x)| (x.to_point(), (Some(index), j)))
+        .collect();
+    (node, input_edges)
+}
+
+fn mk_region(_dsts: &[Operand], _nodes: &[RvsdgBody]) -> Region {
+    Region {
+        srcs: 0,
+        dsts: 0,
+        nodes: vec![],
+        edges: vec![],
     }
 }
 
 impl RvsdgFunction {
     pub(crate) fn to_svg(&self, path: &str) {
-        // todo: convert self to a Region
         let srcs = self.n_args;
         let (nodes, edges): (Vec<_>, Vec<_>) = self
             .nodes
             .iter()
-            .map(|body| body.to_node(&self.nodes))
+            .enumerate()
+            .map(|(i, n)| mk_node_and_input_edges(n, i, &self.nodes))
             .unzip();
         let edges = edges.concat();
         let dsts = edges
