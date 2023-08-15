@@ -572,32 +572,23 @@ fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge
     (node, input_edges)
 }
 
-// returns only nodes in the SAME REGION as `from`
-// does traversals both up and down the tree
-fn reachable_nodes(reachable: &mut HashSet<usize>, all: &[RvsdgBody], from: Operand) {
-    for (i, node) in all.iter().enumerate() {
-        // make a set of inputs ports for this node
-        let mut operands = match node {
+// returns only nodes in the same REGION as `output`
+fn reachable_nodes(reachable: &mut HashSet<usize>, all: &[RvsdgBody], output: Operand) {
+    let id = match output {
+        Operand::Arg(..) => return,
+        Operand::Id(id) => id,
+        Operand::Project(_, id) => id,
+    };
+    let id = id as usize;
+    if reachable.insert(id) {
+        let inputs = match &all[id] {
             RvsdgBody::PureOp(Expr::Op(_, xs)) | RvsdgBody::PureOp(Expr::Call(_, xs)) => xs.clone(),
             RvsdgBody::PureOp(Expr::Const(..)) => vec![],
             RvsdgBody::Gamma { pred, inputs, .. } => once(pred).chain(inputs).copied().collect(),
             RvsdgBody::Theta { inputs, .. } => inputs.clone(),
         };
-        // go both directions by adding output ports
-        match node {
-            RvsdgBody::PureOp(..) => operands.push(Operand::Id(i as Id)),
-            RvsdgBody::Gamma { outputs, .. } => {
-                operands.extend((0..outputs[0].len()).map(|j| Operand::Project(j as u16, i as Id)))
-            }
-            RvsdgBody::Theta { outputs, .. } => {
-                operands.extend((0..outputs.len()).map(|j| Operand::Project(j as u16, i as Id)))
-            }
-        }
-
-        if operands.contains(&from) && reachable.insert(i) {
-            for operand in operands {
-                reachable_nodes(reachable, all, operand)
-            }
+        for input in inputs {
+            reachable_nodes(reachable, all, input);
         }
     }
 }
@@ -712,7 +703,7 @@ mod tests {
         .to_svg();
 
         let svg_gen = RvsdgFunction {
-            n_args: 3,
+            n_args: 2,
             nodes: vec![
                 RvsdgBody::PureOp(Expr::Const(ConstOps::Const, Type::Int, Literal::Int(0))),
                 RvsdgBody::PureOp(Expr::Op(
