@@ -10,6 +10,7 @@ const PORT_RADIUS: f32 = STROKE_WIDTH * 2.0;
 const CORNER_RADIUS: f32 = NODE_SPACING * 0.2;
 const REGION_SPACING: f32 = NODE_SPACING * 0.5;
 
+#[derive(Debug)]
 struct Region {
     srcs: usize,
     dsts: usize,
@@ -17,6 +18,7 @@ struct Region {
     edges: Vec<Edge>,
 }
 
+#[derive(Debug)]
 enum Node {
     Unit(String, usize, usize),
     Match(Vec<(String, Region)>), // vec must be nonempty
@@ -491,16 +493,6 @@ impl Region {
     }
 }
 
-impl Operand {
-    fn to_point(self) -> (Option<usize>, usize) {
-        match self {
-            Operand::Arg(i) => (None, i as usize),
-            Operand::Id(id) => (Some(id as usize), 0),
-            Operand::Project(i, id) => (Some(id as usize), i as usize),
-        }
-    }
-}
-
 fn mk_node_and_input_edges(
     body: &RvsdgBody,
     index: usize,
@@ -522,7 +514,7 @@ fn mk_node_and_input_edges(
             xs.to_vec(),
         ),
         RvsdgBody::PureOp(Expr::Const(ConstOps::Const, _, v)) => {
-            (Node::Unit(format!("{v}"), 0, 0), vec![])
+            (Node::Unit(format!("{v}"), 0, 1), vec![])
         }
         RvsdgBody::Gamma {
             pred,
@@ -552,7 +544,16 @@ fn mk_node_and_input_edges(
     let input_edges = operands
         .iter()
         .enumerate()
-        .map(|(j, x)| (x.to_point(), (Some(index), j)))
+        .map(|(j, x)| {
+            (
+                match x {
+                    Operand::Arg(i) => (None, *i as usize),
+                    Operand::Id(id) => (Some(*id as usize), 0),
+                    Operand::Project(i, id) => (Some(*id as usize), *i as usize),
+                },
+                (Some(index), j),
+            )
+        })
         .collect();
     (node, input_edges)
 }
@@ -575,10 +576,10 @@ impl Region {
     }
 }
 
-fn mk_region(_dsts: &[Operand], _nodes: &[RvsdgBody]) -> Region {
+fn mk_region(dsts: &[Operand], _nodes: &[RvsdgBody]) -> Region {
     Region {
         srcs: 0,
-        dsts: 0,
+        dsts: dsts.len(),
         nodes: vec![],
         edges: vec![],
     }
