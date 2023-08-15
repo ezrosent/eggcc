@@ -528,7 +528,8 @@ fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) 
             Node::Match(
                 outputs
                     .iter()
-                    .map(|os| (String::new(), mk_region(1 + inputs.len(), os, nodes)))
+                    .enumerate()
+                    .map(|(pred, os)| (format!("{pred}"), mk_region(inputs.len(), os, nodes)))
                     .collect(),
             ),
             once(pred).chain(inputs).copied().collect::<Vec<_>>(),
@@ -636,11 +637,11 @@ mod tests {
                             },
                         ),
                         (
-                            "else".to_owned(),
+                            "1".to_owned(),
                             Region {
                                 srcs: 2,
                                 dsts: 1,
-                                nodes: HashMap::from([(0, Node::Unit("+".to_owned(), 2, 1))]),
+                                nodes: HashMap::from([(0, Node::Unit("add".to_owned(), 2, 1))]),
                                 edges: vec![
                                     ((None, 0), (Some(0), 0)),
                                     ((None, 1), (Some(0), 1)),
@@ -656,12 +657,12 @@ mod tests {
                         srcs: 3,
                         dsts: 4,
                         nodes: HashMap::from([
-                            (0, Node::Unit("+".to_owned(), 2, 1)),
+                            (0, Node::Unit("add".to_owned(), 2, 1)),
                             (1, Node::Unit("1".to_owned(), 0, 1)),
                             (2, Node::Unit("5".to_owned(), 0, 1)),
-                            (3, Node::Unit("*".to_owned(), 2, 1)),
-                            (4, Node::Unit("+".to_owned(), 2, 1)),
-                            (5, Node::Unit("=".to_owned(), 2, 1)),
+                            (3, Node::Unit("mul".to_owned(), 2, 1)),
+                            (4, Node::Unit("add".to_owned(), 2, 1)),
+                            (5, Node::Unit("eq".to_owned(), 2, 1)),
                         ]),
                         edges: vec![
                             ((None, 0), (Some(0), 0)),
@@ -679,21 +680,23 @@ mod tests {
                         ],
                     }),
                 ),
-                (2, Node::Unit("+".to_owned(), 2, 1)),
+                (2, Node::Unit("add".to_owned(), 2, 1)),
             ]),
             edges: vec![
                 ((None, 0), (Some(0), 0)),
                 ((None, 0), (Some(0), 1)),
                 ((None, 1), (Some(0), 2)),
+                ((None, 0), (Some(1), 0)),
+                ((None, 1), (Some(1), 1)),
+                ((None, 0), (Some(1), 2)),
                 ((Some(0), 0), (Some(2), 0)),
-                ((Some(1), 0), (Some(2), 1)),
                 ((Some(1), 1), (Some(2), 1)),
                 ((Some(2), 0), (None, 0)),
             ],
         }
         .to_svg();
 
-        let svg_gen = RvsdgFunction {
+        let svg_new = RvsdgFunction {
             n_args: 2,
             nodes: vec![
                 RvsdgBody::PureOp(Expr::Const(ConstOps::Const, Type::Int, Literal::Int(0))),
@@ -720,10 +723,7 @@ mod tests {
                     ValueOps::Add,
                     vec![Operand::Id(5), Operand::Arg(2)],
                 )),
-                RvsdgBody::PureOp(Expr::Op(
-                    ValueOps::Add,
-                    vec![Operand::Id(3), Operand::Id(5)],
-                )),
+                RvsdgBody::PureOp(Expr::Op(ValueOps::Eq, vec![Operand::Id(3), Operand::Id(5)])),
                 RvsdgBody::Theta {
                     pred: Operand::Id(8),
                     inputs: vec![],
@@ -731,7 +731,7 @@ mod tests {
                 },
                 RvsdgBody::PureOp(Expr::Op(
                     ValueOps::Add,
-                    vec![Operand::Id(2), Operand::Id(9)],
+                    vec![Operand::Id(2), Operand::Project(1, 9)],
                 )),
             ],
             result: Some(Operand::Id(10)),
@@ -739,7 +739,7 @@ mod tests {
         .to_svg();
 
         std::fs::write("target/rvsdg2svg_basic_old.svg", &svg_old).unwrap();
-        std::fs::write("target/rvsdg2svg_basic_gen.svg", &svg_gen).unwrap();
-        assert_eq!(svg_old, svg_gen);
+        std::fs::write("target/rvsdg2svg_basic_new.svg", &svg_new).unwrap();
+        assert_eq!(svg_old, svg_new);
     }
 }
