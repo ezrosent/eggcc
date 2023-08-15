@@ -74,7 +74,7 @@ pub(crate) enum Annotation {
     AssignRet { src: Identifier },
 }
 
-pub(crate) type Id = u32;
+pub(crate) type Id = usize;
 
 #[derive(Debug)]
 pub(crate) enum Expr {
@@ -86,11 +86,11 @@ pub(crate) enum Expr {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Operand {
     /// A reference to an argument in the enclosing region.
-    Arg(u32),
+    Arg(usize),
     /// Another node in the RVSDG.
     Id(Id),
     /// Project a single output from a multi-output region.
-    Project(u32, Id),
+    Project(usize, Id),
 }
 
 #[derive(Debug)]

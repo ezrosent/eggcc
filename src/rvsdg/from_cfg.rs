@@ -40,7 +40,7 @@ pub(crate) fn to_rvsdg(cfg: &mut Cfg) -> Result<RvsdgFunction> {
 
     for (i, arg) in builder.cfg.args.iter().enumerate() {
         let arg_var = builder.analysis.intern.intern(&arg.name);
-        builder.env.insert(arg_var, Operand::Arg(i as u32));
+        builder.env.insert(arg_var, Operand::Arg(i));
     }
 
     let mut cur = builder.cfg.entry;
@@ -119,7 +119,7 @@ impl<'a> RvsdgBuilder<'a> {
             // Record the initial value of the loop variable
             inputs.push(get_op(input, &pos, &self.env, &self.analysis.intern)?);
             // Mark it as an argument to the loop.
-            self.env.insert(input, Operand::Arg(i as u32));
+            self.env.insert(input, Operand::Arg(i));
         }
 
         // Now we "run" the loop until we reach the end:
@@ -205,8 +205,7 @@ impl<'a> RvsdgBuilder<'a> {
 
         let live_vars = self.analysis.var_state(block).unwrap();
         for (i, var) in live_vars.live_out.iter().enumerate() {
-            self.env
-                .insert(var, Operand::Project(u32::try_from(i).unwrap(), theta_node));
+            self.env.insert(var, Operand::Project(i, theta_node));
         }
         Ok(self
             .cfg
@@ -262,7 +261,7 @@ impl<'a> RvsdgBuilder<'a> {
             // First, make sure that all inputs are correctly bound to inputs to the block.
             let live_vars = self.analysis.var_state(block).unwrap();
             for (i, var) in live_vars.live_out.iter().enumerate() {
-                self.env.insert(var, Operand::Arg(i as u32));
+                self.env.insert(var, Operand::Arg(i));
             }
             // Loop until we reach a join point.
             let mut curr = succ;
@@ -321,8 +320,7 @@ impl<'a> RvsdgBuilder<'a> {
             .iter()
             .enumerate()
         {
-            self.env
-                .insert(var, Operand::Project(u32::try_from(i).unwrap(), gamma_node));
+            self.env.insert(var, Operand::Project(i, gamma_node));
         }
 
         Ok(Some(next))

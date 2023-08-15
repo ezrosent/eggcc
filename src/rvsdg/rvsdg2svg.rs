@@ -12,15 +12,15 @@ const REGION_SPACING: f32 = NODE_SPACING * 0.5;
 
 #[derive(Debug)]
 struct Region {
-    srcs: u32,
-    dsts: u32,
+    srcs: usize,
+    dsts: usize,
     nodes: HashMap<Id, Node>,
     edges: Vec<Edge>,
 }
 
 #[derive(Debug)]
 enum Node {
-    Unit(String, u32, u32),
+    Unit(String, usize, usize),
     Match(Vec<(String, Region)>), // vec must be nonempty
     Loop(Region),
 }
@@ -28,7 +28,7 @@ enum Node {
 // Each edge goes from an output port to an input port.
 // `None` refers to the region, `Some(i)` refers to the node at index `i`.
 // The second number is the index of the port that is being referred to.
-type Edge = ((Option<Id>, u32), (Option<Id>, u32));
+type Edge = ((Option<Id>, usize), (Option<Id>, usize));
 
 struct Size {
     width: f32,
@@ -85,7 +85,7 @@ impl ToString for Xml {
     }
 }
 
-fn blend(width: f32, total: u32, index: u32) -> f32 {
+fn blend(width: f32, total: usize, index: usize) -> f32 {
     width / ((total + 1) as f32) * (index + 1) as f32
 }
 
@@ -390,10 +390,14 @@ impl Region {
             };
             let (b_x, b_y) = match b {
                 None => (blend(size.width, self.dsts, *j), size.height),
-                Some(b) => (
-                    positions[b].0 + self.nodes[b].inputs(children[b].0.width)[*j as usize],
-                    positions[b].1,
-                ),
+                Some(b) => {
+                    println!("{:?}", ((a, i), (b, j)));
+                    println!("{:?} {:?}", self.nodes[b].inputs(children[b].0.width), j);
+                    (
+                        positions[b].0 + self.nodes[b].inputs(children[b].0.width)[*j as usize],
+                        positions[b].1,
+                    )
+                }
             };
 
             let break_y = match a {
@@ -406,7 +410,7 @@ impl Region {
                     let layer = layers.iter().find(|layer| layer.contains(a)).unwrap();
                     let total = layer
                         .iter()
-                        .map(|node| self.nodes[node].outputs(0.0).len() as u32)
+                        .map(|node| self.nodes[node].outputs(0.0).len())
                         .sum();
                     let mut index = 0;
                     for node in layer.iter().rev() {
@@ -414,7 +418,7 @@ impl Region {
                             index += *i;
                             break;
                         }
-                        index += self.nodes[node].outputs(0.0).len() as u32;
+                        index += self.nodes[node].outputs(0.0).len();
                     }
                     a_y + CORNER_RADIUS + blend(NODE_SPACING - CORNER_RADIUS * 2.0, total, index)
                 }
@@ -504,7 +508,7 @@ impl Region {
 fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) {
     let (node, operands): (Node, Vec<Operand>) = match &nodes[index as usize] {
         RvsdgBody::PureOp(Expr::Op(f, xs)) => {
-            (Node::Unit(format!("{f}"), xs.len() as u32, 1), xs.to_vec())
+            (Node::Unit(format!("{f}"), xs.len(), 1), xs.to_vec())
         }
         RvsdgBody::PureOp(Expr::Call(f, xs)) => (
             Node::Unit(
@@ -512,7 +516,7 @@ fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) 
                     Identifier::Name(s) => (**s).to_owned(),
                     Identifier::Num(x) => format!("{x}"),
                 },
-                xs.len() as u32,
+                xs.len(),
                 1,
             ),
             xs.to_vec(),
@@ -528,7 +532,7 @@ fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) 
             Node::Match(
                 outputs
                     .iter()
-                    .map(|os| (String::new(), mk_region(os, nodes)))
+                    .map(|os| (String::new(), mk_region(_, os, nodes)))
                     .collect(),
             ),
             once(pred).chain(inputs).copied().collect::<Vec<_>>(),
@@ -539,6 +543,7 @@ fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) 
             outputs,
         } => (
             Node::Loop(mk_region(
+                _,
                 &once(pred).chain(outputs).copied().collect::<Vec<_>>(),
                 nodes,
             )),
@@ -555,7 +560,7 @@ fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) 
                     Operand::Id(id) => (Some(*id), 0),
                     Operand::Project(i, id) => (Some(*id), *i),
                 },
-                (Some(index), j as u32),
+                (Some(index), j),
             )
         })
         .collect();
@@ -582,7 +587,7 @@ fn reachable_nodes(reachable: &mut HashSet<Id>, all: &[RvsdgBody], output: Opera
     }
 }
 
-fn mk_region(dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
+fn mk_region(srcs: usize, dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
     let mut reachable = HashSet::new();
     dsts.iter().for_each(|operand| {
         reachable_nodes(&mut reachable, nodes, *operand);
@@ -596,18 +601,10 @@ fn mk_region(dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
         })
         .unzip();
     let edges = edges.concat();
-    let srcs = edges
-        .iter()
-        .filter_map(|((a, i), _)| match a {
-            None => Some(*i),
-            Some(_) => None,
-        })
-        .max()
-        .unwrap_or(0);
 
     Region {
         srcs,
-        dsts: dsts.len() as u32,
+        dsts: dsts.len(),
         nodes,
         edges,
     }
@@ -616,7 +613,7 @@ fn mk_region(dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
 impl RvsdgFunction {
     pub(crate) fn to_svg(&self) -> String {
         let dsts: Vec<_> = self.result.iter().copied().collect();
-        mk_region(&dsts, &self.nodes).to_svg()
+        mk_region(self.n_args, &dsts, &self.nodes).to_svg()
     }
 }
 
