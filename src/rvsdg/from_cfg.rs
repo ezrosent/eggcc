@@ -28,7 +28,6 @@ use super::{
 pub(crate) fn to_rvsdg(cfg: &mut Cfg) -> Result<RvsdgFunction> {
     cfg.restructure();
     let analysis = live_variables(cfg);
-    let please_remove = 1;
     eprintln!("live variables: {:#?}", analysis);
     let dom = dominators::simple_fast(&cfg.graph, cfg.entry);
     let mut builder = RvsdgBuilder {
