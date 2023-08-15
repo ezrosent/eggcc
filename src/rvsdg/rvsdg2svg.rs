@@ -538,7 +538,7 @@ fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge
             Node::Match(
                 outputs
                     .iter()
-                    .map(|os| (String::new(), mk_region(None, os, nodes)))
+                    .map(|os| (String::new(), mk_region(os, nodes)))
                     .collect(),
             ),
             once(pred).chain(inputs).copied().collect::<Vec<_>>(),
@@ -549,7 +549,6 @@ fn mk_node_and_input_edges(index: usize, nodes: &[RvsdgBody]) -> (Node, Vec<Edge
             outputs,
         } => (
             Node::Loop(mk_region(
-                None,
                 &once(pred).chain(outputs).copied().collect::<Vec<_>>(),
                 nodes,
             )),
@@ -603,16 +602,13 @@ fn reachable_nodes(reachable: &mut HashSet<usize>, all: &[RvsdgBody], from: Oper
     }
 }
 
-fn mk_region(n_args: Option<usize>, dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
+fn mk_region(dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
     println!("{:?}", dsts);
 
     let mut reachable = HashSet::new();
-    (0..n_args.unwrap_or(0))
-        .map(|i| Operand::Arg(i as u32))
-        .chain(dsts.iter().copied())
-        .for_each(|operand| {
-            reachable_nodes(&mut reachable, nodes, operand);
-        });
+    dsts.iter().for_each(|operand| {
+        reachable_nodes(&mut reachable, nodes, *operand);
+    });
 
     let (nodes, edges): (Vec<_>, Vec<_>) = reachable
         .iter()
@@ -628,10 +624,6 @@ fn mk_region(n_args: Option<usize>, dsts: &[Operand], nodes: &[RvsdgBody]) -> Re
         .max()
         .unwrap_or(0);
 
-    if let Some(n_args) = n_args {
-        assert_eq!(n_args, srcs);
-    }
-
     Region {
         srcs,
         dsts: dsts.len(),
@@ -642,7 +634,7 @@ fn mk_region(n_args: Option<usize>, dsts: &[Operand], nodes: &[RvsdgBody]) -> Re
 
 impl RvsdgFunction {
     pub(crate) fn to_svg(&self) -> String {
-        mk_region(Some(self.n_args), &[], &self.nodes).to_svg()
+        mk_region(&[], &self.nodes).to_svg()
     }
 }
 
