@@ -1,5 +1,5 @@
 use crate::rvsdg::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::iter::once;
 
 const SIMPLE_NODE_SIZE: f32 = 100.0;
@@ -14,7 +14,7 @@ const REGION_SPACING: f32 = NODE_SPACING * 0.5;
 struct Region {
     srcs: usize,
     dsts: usize,
-    nodes: HashMap<Id, Node>,
+    nodes: BTreeMap<Id, Node>,
     edges: Vec<Edge>,
 }
 
@@ -37,7 +37,7 @@ struct Size {
 
 struct Xml {
     tag: String,
-    attributes: HashMap<String, String>,
+    attributes: BTreeMap<String, String>,
     body: String,
 }
 
@@ -60,7 +60,7 @@ impl Xml {
     fn group(children: impl IntoIterator<Item = Xml>) -> Xml {
         Xml {
             tag: "g".to_owned(),
-            attributes: HashMap::new(),
+            attributes: BTreeMap::new(),
             body: children.into_iter().map(|xml| xml.to_string()).collect(),
         }
     }
@@ -319,10 +319,10 @@ impl Node {
 
 impl Region {
     fn to_xml(&self, in_loop: bool) -> (Size, Xml) {
-        let mut children: HashMap<_, _> = self.nodes.iter().map(|t| (t.0, t.1.to_xml())).collect();
+        let mut children: BTreeMap<_, _> = self.nodes.iter().map(|t| (t.0, t.1.to_xml())).collect();
 
         let mut layers: Vec<Vec<Id>> = vec![];
-        let mut to_order: HashSet<Id> = self.nodes.keys().copied().collect();
+        let mut to_order: BTreeSet<Id> = self.nodes.keys().copied().collect();
         while !to_order.is_empty() {
             let mut next_layer = to_order.clone();
             for ((a, _), (b, _)) in &self.edges {
@@ -360,7 +360,7 @@ impl Region {
 
         let mut w = NODE_SPACING;
         let mut h = NODE_SPACING;
-        let positions: HashMap<Id, (f32, f32)> = layers
+        let positions: BTreeMap<Id, (f32, f32)> = layers
             .iter()
             .zip(sizes)
             .rev()
@@ -565,7 +565,7 @@ fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) 
 }
 
 // returns only nodes in the same REGION as `output`
-fn reachable_nodes(reachable: &mut HashSet<Id>, all: &[RvsdgBody], output: Operand) {
+fn reachable_nodes(reachable: &mut BTreeSet<Id>, all: &[RvsdgBody], output: Operand) {
     let id = match output {
         Operand::Arg(..) => return,
         Operand::Id(id) => id,
@@ -585,12 +585,12 @@ fn reachable_nodes(reachable: &mut HashSet<Id>, all: &[RvsdgBody], output: Opera
 }
 
 fn mk_region(srcs: usize, dsts: &[Operand], nodes: &[RvsdgBody]) -> Region {
-    let mut reachable = HashSet::new();
+    let mut reachable = BTreeSet::new();
     dsts.iter().for_each(|operand| {
         reachable_nodes(&mut reachable, nodes, *operand);
     });
 
-    let (nodes, edges): (HashMap<_, _>, Vec<_>) = reachable
+    let (nodes, edges): (BTreeMap<_, _>, Vec<_>) = reachable
         .iter()
         .map(|i| {
             let (node, edges) = mk_node_and_input_edges(*i, nodes);
@@ -634,7 +634,7 @@ mod tests {
         let svg_old = Region {
             srcs: 2,
             dsts: 1,
-            nodes: HashMap::from([
+            nodes: BTreeMap::from([
                 (
                     0,
                     Node::Match(vec![
@@ -643,7 +643,7 @@ mod tests {
                             Region {
                                 srcs: 2,
                                 dsts: 1,
-                                nodes: HashMap::from([(0, Node::Unit("0".to_owned(), 0, 1))]),
+                                nodes: BTreeMap::from([(0, Node::Unit("0".to_owned(), 0, 1))]),
                                 edges: vec![((Some(0), 0), (None, 0))],
                             },
                         ),
@@ -652,7 +652,7 @@ mod tests {
                             Region {
                                 srcs: 2,
                                 dsts: 1,
-                                nodes: HashMap::from([(0, Node::Unit("add".to_owned(), 2, 1))]),
+                                nodes: BTreeMap::from([(0, Node::Unit("add".to_owned(), 2, 1))]),
                                 edges: vec![
                                     ((None, 0), (Some(0), 0)),
                                     ((None, 1), (Some(0), 1)),
@@ -667,7 +667,7 @@ mod tests {
                     Node::Loop(Region {
                         srcs: 3,
                         dsts: 4,
-                        nodes: HashMap::from([
+                        nodes: BTreeMap::from([
                             (0, Node::Unit("add".to_owned(), 2, 1)),
                             (1, Node::Unit("1".to_owned(), 0, 1)),
                             (2, Node::Unit("5".to_owned(), 0, 1)),
