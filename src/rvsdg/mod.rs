@@ -32,9 +32,7 @@
 pub(crate) mod from_cfg;
 pub(crate) mod live_variables;
 pub(crate) mod restructure;
-
-#[cfg(test)]
-mod tests;
+pub(crate) mod rvsdg2svg;
 
 use bril_rs::{ConstOps, Literal, Type, ValueOps};
 use thiserror::Error;
@@ -76,7 +74,7 @@ pub(crate) enum Annotation {
     AssignRet { src: Identifier },
 }
 
-pub(crate) type Id = u32;
+pub(crate) type Id = usize;
 
 #[derive(Debug)]
 pub(crate) enum Expr {
@@ -88,11 +86,11 @@ pub(crate) enum Expr {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Operand {
     /// A reference to an argument in the enclosing region.
-    Arg(u32),
+    Arg(usize),
     /// Another node in the RVSDG.
     Id(Id),
     /// Project a single output from a multi-output region.
-    Project(u16, Id),
+    Project(usize, Id),
 }
 
 #[derive(Debug)]

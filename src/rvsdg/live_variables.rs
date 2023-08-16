@@ -12,7 +12,7 @@ use hashbrown::HashMap;
 use indexmap::IndexSet;
 use petgraph::{
     stable_graph::NodeIndex,
-    visit::{DfsPostOrder, IntoNeighborsDirected, VisitMap, Visitable},
+    visit::{DfsPostOrder, VisitMap, Visitable},
     Direction,
 };
 
