@@ -1,0 +1,75 @@
+@main(input: int): int {
+  one: int = const 1;
+  x: int = const 4;
+  a_cond: bool = lt x x;
+  br a_cond .B .C;
+.B:
+  a: int = const 1;
+  b_cond: bool = lt x one;
+  x: int = add x one;
+  br b_cond .C .D;
+.C:
+  z: int = const 1;
+  jmp .B;
+.D:
+  ret x;
+}
+
+
+# restructured should be
+# PBT w/reducibility check
+# PBT w/interpreter pre/post
+# 
+# TODO: reflect back into valid bril.
+# TODO: RVSDG paper's translation back to a CFG.
+# 
+# @main(input: int): int {
+#   one: int = const 1;
+#   x: int = const 4;
+#   a_cond: bool = lt x x;
+#   -- #n means placeholder(n), a label
+#   br a_cond #8 #7;
+# 
+# #7:
+#   -- ^n means Num(n), an identifier
+#   ^1 : int = const 1;
+#   jmp #5;
+# 
+# #8:
+#   -- ^n means Num(n), an identifier
+#   ^1 : int = const 0;
+#   jmp #5;
+# 
+# #5: -- loop head
+#   br ^1 .C .B;
+# 
+# .B:
+#   a: int = const 1;
+#   b_cond: bool = lt x one;
+#   x: int = add x one;
+#   br b_cond #9 #10;
+# 
+# .C:
+#   z: int = const 1;
+#   ^1: int = const 0;
+#   ^0: int = const 1;
+#   jmp #6;
+# 
+# #9:
+#   ^1: int = const 1;
+#   ^0: int = const 1;
+#   jmp #6;
+# 
+# #10:
+#   ^2: int = const 0;
+#   ^0: int = const 0;
+#   jmp #6;
+# 
+# NB: we need space here
+# #6: -- loop tail
+#   br ^0 #5 .D
+# 
+# .D:
+#   ret x;
+# 
+# }
