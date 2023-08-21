@@ -17,7 +17,7 @@ use petgraph::{
 };
 
 use crate::{
-    cfg::{ret_id, Cfg, Identifier, NodeSet},
+    cfg::{ret_id, BranchOp, Cfg, Identifier, NodeSet},
     util::ListDisplay,
 };
 
@@ -37,6 +37,17 @@ pub(crate) fn live_variables(cfg: &Cfg) -> LiveVariableAnalysis {
             state.gen.insert(names.intern(ret_id()));
         }
 
+        // Live variable analysis is "bottom-up": we do everything in reverse
+        // order. First, look at the branches:
+
+        for edge in cfg.graph.edges_directed(block, Direction::Outgoing) {
+            if let BranchOp::Cond { arg, .. } = &edge.weight().op {
+                state.gen.insert(names.intern(arg.clone()));
+            }
+        }
+
+        // Then the footers (in reverse order; though they shouldn't contain any
+        // mutual dependencies).
         for ann in weight.footer.iter().rev() {
             match ann {
                 Annotation::AssignCond { dst, .. } => {
@@ -49,6 +60,8 @@ pub(crate) fn live_variables(cfg: &Cfg) -> LiveVariableAnalysis {
                 }
             }
         }
+
+        // Finally the instructions themselves.
         for instr in weight.instrs.iter().rev() {
             match instr {
                 Instruction::Constant { dest, .. } => {
@@ -71,6 +84,7 @@ pub(crate) fn live_variables(cfg: &Cfg) -> LiveVariableAnalysis {
                 }
             }
         }
+        // TODO: include branches
         worklist.push(block);
     }
 

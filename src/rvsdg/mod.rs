@@ -34,10 +34,15 @@ pub(crate) mod live_variables;
 pub(crate) mod restructure;
 pub(crate) mod rvsdg2svg;
 
+use std::fmt;
+
 use bril_rs::{ConstOps, Literal, Type, ValueOps};
 use thiserror::Error;
 
 use crate::cfg::Identifier;
+
+#[cfg(test)]
+mod tests;
 
 /// Errors from the rvsdg module.
 #[derive(Debug, Error)]
@@ -108,7 +113,6 @@ pub(crate) enum RvsdgBody {
     },
 }
 
-#[derive(Debug)]
 pub(crate) struct RvsdgFunction {
     /// The number of input arguments to the function.
     pub(crate) n_args: usize,
@@ -119,4 +123,18 @@ pub(crate) struct RvsdgFunction {
     /// NB: until effects are supported, the only way to ensure a computation is
     /// marked as used is to populate a result of some kind.
     pub(crate) result: Option<Operand>,
+}
+
+impl fmt::Debug for RvsdgFunction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RvsdgFunction")
+            .field("n_args", &self.n_args)
+            .field("result", &self.result);
+        let mut map = f.debug_map();
+        for (i, node) in self.nodes.iter().enumerate() {
+            map.entry(&i, node);
+        }
+        map.finish()?;
+        write!(f, "}}")
+    }
 }

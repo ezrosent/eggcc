@@ -18,12 +18,17 @@ pub(crate) type NodeSet = <StableDiGraph<BasicBlock, Branch> as Visitable>::Map;
 #[cfg(test)]
 mod tests;
 
+/// Identifiers either come from the source Bril program or are synthesized as
+/// part of the RVSDG conversion process. The `Identifier` type stores both
+/// kinds of name.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Identifier {
     Name(Box<str>),
     Num(usize),
 }
 
+/// The distinguished identifier associated with the return value of a function,
+/// if it has one.
 pub(crate) fn ret_id() -> Identifier {
     Identifier::Num(!0)
 }
@@ -34,18 +39,26 @@ impl<T: AsRef<str>> From<T> for Identifier {
     }
 }
 
+/// The name (or label) associated with a basic block.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum BlockName {
+    /// The unique entrypoint for a function.
     Entry,
+    /// The unique exit point for a function (assuming the function is not an infinite loop).
     Exit,
+    /// An unnamed block generated as part of the restructuring process.
     Placeholder(usize),
+    /// A named block from the original Bril program.
     Named(String),
 }
 
 #[derive(Debug)]
 pub(crate) struct BasicBlock {
+    /// The primary instructions for a block.
     pub(crate) instrs: Vec<Instruction>,
+    /// Any annotations added to the end of the block during restructuring.
     pub(crate) footer: Vec<Annotation>,
+    /// The name for the block.
     pub(crate) name: BlockName,
     pub(crate) pos: Option<Position>,
 }

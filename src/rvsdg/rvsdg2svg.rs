@@ -1,6 +1,11 @@
-use crate::rvsdg::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter::once;
+
+use bril_rs::ConstOps;
+
+use crate::cfg::Identifier;
+
+use super::{Expr, Id, Operand, RvsdgBody, RvsdgFunction};
 
 const SIMPLE_NODE_SIZE: f32 = 100.0;
 const STROKE_WIDTH: f32 = SIMPLE_NODE_SIZE * 0.02;
@@ -631,6 +636,7 @@ impl RvsdgFunction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bril_rs::{Literal, Type, ValueOps};
 
     #[test]
     fn rvsdg2svg_basic() {

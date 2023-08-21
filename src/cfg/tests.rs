@@ -86,7 +86,7 @@ cfg_test!(
 
 #[test]
 fn restructure_basic() {
-    let prog = parse_from_string(include_str!("../../data/unstructured.bril"));
+    let prog = parse_from_string(include_str!("../../data/unstructured-val.bril"));
     let mut cfg = to_cfg(&prog.functions[0]);
     cfg.restructure();
     // TODO: more tests.

@@ -28,19 +28,18 @@ use super::{
 pub(crate) fn to_rvsdg(cfg: &mut Cfg) -> Result<RvsdgFunction> {
     cfg.restructure();
     let analysis = live_variables(cfg);
-    eprintln!("live variables: {:#?}", analysis);
     let dom = dominators::simple_fast(&cfg.graph, cfg.entry);
     let mut builder = RvsdgBuilder {
         cfg,
         expr: Default::default(),
         analysis,
         dom,
-        env: Default::default(),
+        store: Default::default(),
     };
 
     for (i, arg) in builder.cfg.args.iter().enumerate() {
         let arg_var = builder.analysis.intern.intern(&arg.name);
-        builder.env.insert(arg_var, Operand::Arg(i));
+        builder.store.insert(arg_var, Operand::Arg(i));
     }
 
     let mut cur = builder.cfg.entry;
@@ -55,7 +54,7 @@ pub(crate) fn to_rvsdg(cfg: &mut Cfg) -> Result<RvsdgFunction> {
         Some(get_op(
             ret_var,
             &None,
-            &builder.env,
+            &builder.store,
             &builder.analysis.intern,
         )?)
     } else {
@@ -73,8 +72,7 @@ pub(crate) struct RvsdgBuilder<'a> {
     expr: Vec<RvsdgBody>,
     analysis: LiveVariableAnalysis,
     dom: Dominators<NodeIndex>,
-    // TODO: initialize mapping to arguments
-    env: HashMap<VarId, Operand>,
+    store: HashMap<VarId, Operand>,
 }
 
 impl<'a> RvsdgBuilder<'a> {
@@ -117,9 +115,9 @@ impl<'a> RvsdgBuilder<'a> {
         let pos = self.cfg.graph[block].pos.clone();
         for (i, input) in live_vars.live_in.iter().enumerate() {
             // Record the initial value of the loop variable
-            inputs.push(get_op(input, &pos, &self.env, &self.analysis.intern)?);
+            inputs.push(get_op(input, &pos, &self.store, &self.analysis.intern)?);
             // Mark it as an argument to the loop.
-            self.env.insert(input, Operand::Arg(i));
+            self.store.insert(input, Operand::Arg(i));
         }
 
         // Now we "run" the loop until we reach the end:
@@ -139,7 +137,7 @@ impl<'a> RvsdgBuilder<'a> {
         let live_vars = self.analysis.var_state(block).unwrap();
         let mut outputs = Vec::with_capacity(inputs.len());
         for input in live_vars.live_in.iter() {
-            outputs.push(get_op(input, &pos, &self.env, &self.analysis.intern)?);
+            outputs.push(get_op(input, &pos, &self.store, &self.analysis.intern)?);
         }
 
         // Now to discover the loop predicate:
@@ -181,7 +179,7 @@ impl<'a> RvsdgBuilder<'a> {
                     "loop predicate has more than two options (restructuring should avoid this)"
                 );
                 let var = self.analysis.intern.intern(arg);
-                let op = get_op(var, &None, &self.env, &self.analysis.intern)?;
+                let op = get_op(var, &None, &self.store, &self.analysis.intern)?;
                 if val == 0 {
                     // We need to negate the operand
                     Operand::Id(get_id(
@@ -205,7 +203,7 @@ impl<'a> RvsdgBuilder<'a> {
 
         let live_vars = self.analysis.var_state(block).unwrap();
         for (i, var) in live_vars.live_out.iter().enumerate() {
-            self.env.insert(var, Operand::Project(i, theta_node));
+            self.store.insert(var, Operand::Project(i, theta_node));
         }
         Ok(self
             .cfg
@@ -253,7 +251,7 @@ impl<'a> RvsdgBuilder<'a> {
         let mut outputs = Vec::<Vec<Operand>>::new();
         let live_vars = self.analysis.var_state(block).unwrap();
         for var in live_vars.live_out.iter() {
-            inputs.push(get_op(var, &None, &self.env, &self.analysis.intern)?);
+            inputs.push(get_op(var, &None, &self.store, &self.analysis.intern)?);
         }
 
         let mut next = None;
@@ -261,7 +259,7 @@ impl<'a> RvsdgBuilder<'a> {
             // First, make sure that all inputs are correctly bound to inputs to the block.
             let live_vars = self.analysis.var_state(block).unwrap();
             for (i, var) in live_vars.live_out.iter().enumerate() {
-                self.env.insert(var, Operand::Arg(i));
+                self.store.insert(var, Operand::Arg(i));
             }
             // Loop until we reach a join point.
             let mut curr = succ;
@@ -284,7 +282,7 @@ impl<'a> RvsdgBuilder<'a> {
             let live_vars = self.analysis.var_state(curr).unwrap();
             let mut output_vec = Vec::new();
             for var in live_vars.live_in.iter() {
-                let op = get_op(var, pos, &self.env, &self.analysis.intern)?;
+                let op = get_op(var, pos, &self.store, &self.analysis.intern)?;
                 output_vec.push(op);
             }
             outputs.push(output_vec);
@@ -300,7 +298,7 @@ impl<'a> RvsdgBuilder<'a> {
         let pred = get_op(
             pred_var,
             &self.cfg.graph[block].pos,
-            &self.env,
+            &self.store,
             &self.analysis.intern,
         )?;
         let gamma_node = get_id(
@@ -320,7 +318,7 @@ impl<'a> RvsdgBuilder<'a> {
             .iter()
             .enumerate()
         {
-            self.env.insert(var, Operand::Project(i, gamma_node));
+            self.store.insert(var, Operand::Project(i, gamma_node));
         }
 
         Ok(Some(next))
@@ -363,7 +361,7 @@ impl<'a> RvsdgBuilder<'a> {
                         &mut self.expr,
                         RvsdgBody::PureOp(Expr::Const(*op, const_type.clone(), value.clone())),
                     );
-                    self.env.insert(dest_var, Operand::Id(const_id));
+                    self.store.insert(dest_var, Operand::Id(const_id));
                 }
                 Instruction::Value {
                     args,
@@ -383,30 +381,43 @@ impl<'a> RvsdgBuilder<'a> {
                     ValueOps::Id => {
                         let dest_var = self.analysis.intern.intern(dest);
                         let src_var = self.analysis.intern.intern(&args[0]);
-                        let Some(arg_id) = self.env.get(&src_var).copied() else {
+                        let Some(arg_id) = self.store.get(&src_var).copied() else {
                             return Err(RvsdgError::UndefinedId {
                                 id: self.analysis.intern.get_var(src_var).clone(),
                                 pos: pos.clone(),
                             });
                         };
-                        self.env.insert(dest_var, arg_id);
+                        self.store.insert(dest_var, arg_id);
                     }
                     _ => {
                         let dest_var = self.analysis.intern.intern(dest);
-                        let ops = convert_args(args, &mut self.analysis, &mut self.env, pos)?;
+                        let ops = convert_args(args, &mut self.analysis, &mut self.store, pos)?;
                         let expr = if let ValueOps::Call = op {
                             Expr::Call((&funcs[0]).into(), ops)
                         } else {
                             Expr::Op(*op, ops)
                         };
                         let expr_id = get_id(&mut self.expr, RvsdgBody::PureOp(expr));
-                        self.env.insert(dest_var, Operand::Id(expr_id));
+                        self.store.insert(dest_var, Operand::Id(expr_id));
                     }
                 },
+                Instruction::Effect {
+                    op: EffectOps::Nop, ..
+                } => {}
+                Instruction::Effect {
+                    op: EffectOps::Call,
+                    args,
+                    funcs,
+                    pos,
+                    ..
+                } => {
+                    let _ops = convert_args(args, &mut self.analysis, &mut self.store, pos)?;
+                    debug_assert_eq!(funcs.len(), 1);
+                    // For now, there's nothing more to do when calling
+                    // functions that have no return value. Eventually we'll
+                    // need it though!
+                }
                 Instruction::Effect { op, pos, .. } => {
-                    if let EffectOps::Nop = op {
-                        continue;
-                    }
                     // Two notes here:
                     // * Control flow like Return and Jmp _are_ supported, but
                     // the instructions should be eliminated as part of CFG
@@ -435,14 +446,14 @@ impl<'a> RvsdgBuilder<'a> {
                         )),
                     );
                     let dest_var = self.analysis.intern.intern(dst.clone());
-                    self.env.insert(dest_var, Operand::Id(id));
+                    self.store.insert(dest_var, Operand::Id(id));
                 }
                 Annotation::AssignRet { src } => {
                     let src_var = self.analysis.intern.intern(src.clone());
                     let ret_var = self.analysis.intern.intern(ret_id());
-                    self.env.insert(
+                    self.store.insert(
                         ret_var,
-                        get_op(src_var, &block.pos, &self.env, &self.analysis.intern)?,
+                        get_op(src_var, &block.pos, &self.store, &self.analysis.intern)?,
                     );
                 }
             }
