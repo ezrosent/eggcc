@@ -509,17 +509,9 @@ fn mk_node_and_input_edges(index: Id, nodes: &[RvsdgBody]) -> (Node, Vec<Edge>) 
         RvsdgBody::PureOp(Expr::Op(f, xs)) => {
             (Node::Unit(format!("{f}"), xs.len(), 1), xs.to_vec())
         }
-        RvsdgBody::PureOp(Expr::Call(f, xs)) => (
-            Node::Unit(
-                match f {
-                    Identifier::Name(s) => (**s).to_owned(),
-                    Identifier::Num(x) => format!("{x}"),
-                },
-                xs.len(),
-                1,
-            ),
-            xs.to_vec(),
-        ),
+        RvsdgBody::PureOp(Expr::Call(f, xs)) => {
+            (Node::Unit(f.to_string(), xs.len(), 1), xs.to_vec())
+        }
         RvsdgBody::PureOp(Expr::Const(ConstOps::Const, _, v)) => {
             (Node::Unit(format!("{v}"), 0, 1), vec![])
         }

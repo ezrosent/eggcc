@@ -23,6 +23,14 @@ pub(crate) enum Identifier {
     Name(Box<str>),
     Num(usize),
 }
+impl ToString for Identifier {
+    fn to_string(&self) -> String {
+        match self {
+            Identifier::Name(s) => (**s).to_owned(),
+            Identifier::Num(x) => format!("{x}"),
+        }
+    }
+}
 
 pub(crate) fn ret_id() -> Identifier {
     Identifier::Num(!0)
