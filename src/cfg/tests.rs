@@ -49,7 +49,7 @@ macro_rules! cfg_test {
 
 cfg_test!(
     fib,
-    include_str!("../../data/fib.bril"),
+    include_str!("../../tests/fib.bril"),
     [
         ENTRY  = (Jmp) => "loop",
         "loop" = (Cond { arg: "cond".into(), val: true.into() }) => "body",
@@ -61,7 +61,7 @@ cfg_test!(
 
 cfg_test!(
     queen,
-    include_str!("../../data/queens-func.bril"),
+    include_str!("../../tests/queens-func.bril"),
     [
         ENTRY = (Cond { arg: "ret_cond".into(), val: true.into() }) => "next.ret",
         ENTRY = (Cond { arg: "ret_cond".into(), val: false.into()}) => "for.cond",
@@ -78,7 +78,7 @@ cfg_test!(
 
 cfg_test!(
     implicit_return,
-    include_str!("../../data/implicit-return.bril"),
+    include_str!("../../tests/implicit-return.bril"),
     [
         ENTRY = (Jmp) => EXIT,
     ]
@@ -86,7 +86,7 @@ cfg_test!(
 
 #[test]
 fn restructure_basic() {
-    let prog = parse_from_string(include_str!("../../data/unstructured-val.bril"));
+    let prog = parse_from_string(include_str!("../../tests/unstructured-val.bril"));
     let mut cfg = to_cfg(&prog.functions[0]);
     cfg.restructure();
     // TODO: more tests.

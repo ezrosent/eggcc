@@ -221,6 +221,21 @@ impl Cfg {
         }
     }
 
+    fn split_arc(&mut self, edge: EdgeIndex) {
+        let (src, dst) = self.graph.edge_endpoints(edge).unwrap();
+        let middle = self.fresh_block();
+        let weight = self.graph.remove_edge(edge).unwrap();
+        self.graph.add_edge(src, middle, weight);
+        self.graph.add_edge(
+            middle,
+            dst,
+            Branch {
+                op: BranchOp::Jmp,
+                pos: None,
+            },
+        );
+    }
+
     fn split_edges(&mut self, node: NodeIndex) {
         let mut has_jmp = false;
         let mut walker = self
@@ -230,7 +245,11 @@ impl Cfg {
         while let Some((edge, other)) = walker.next(&self.graph) {
             assert!(!has_jmp);
             match &self.graph.edge_weight(edge).unwrap().op {
-                BranchOp::Jmp => {
+                BranchOp::Jmp
+                | BranchOp::Cond {
+                    val: CondVal { of: 1, .. },
+                    ..
+                } => {
                     has_jmp = true;
                     continue;
                 }
@@ -262,12 +281,11 @@ impl Cfg {
         }
         let cond = state.fresh();
 
-        if blocks.len() == 1 && *blocks.iter().next().unwrap().0 == node {
-            return (blocks, cond);
-        }
-
         let n_blocks = u32::try_from(blocks.len()).unwrap();
         for (block, val) in blocks.iter() {
+            if *block == node {
+                continue;
+            }
             self.branch_if(
                 node,
                 *block,
@@ -314,32 +332,47 @@ impl Cfg {
             }
         }
 
-        for (_, conts) in tail_continuations
-            .into_iter()
-            .filter(|(_, cs)| cs.len() > 1)
-        {
-            let mux = self.fresh_block();
-            let (preds, cond_var) = self.make_demux_node(mux, conts.iter().copied(), state);
-            for cont in conts {
+        for (idom, conts) in tail_continuations.into_iter() {
+            // Split any direct edges from the idom to the continuation. If we
+            // have more than one continuation then split _all_ edges.
+            for cont in &conts {
                 let mut walker = self
                     .graph
-                    .neighbors_directed(cont, Direction::Incoming)
+                    .neighbors_directed(*cont, Direction::Incoming)
                     .detach();
-                while let Some((_, src)) = walker.next(&self.graph) {
-                    self.split_edges(src);
+                while let Some((e, src)) = walker.next(&self.graph) {
+                    if src == idom && conts.len() == 1 {
+                        self.split_arc(e);
+                    } else if conts.len() > 1 {
+                        self.split_edges(src);
+                    }
                 }
-                walker = self
+            }
+
+            // The rest of this loop is focused on mux/demux for multiple
+            // continuations. If we only have one, we are done.
+            if conts.len() == 1 {
+                continue;
+            }
+            let mux = self.fresh_block();
+            let (preds, cond_var) = self.make_demux_node(mux, conts.iter().copied(), state);
+
+            for cont in &conts {
+                let mut walker = self
                     .graph
-                    .neighbors_directed(cont, Direction::Incoming)
+                    .neighbors_directed(*cont, Direction::Incoming)
                     .detach();
 
                 // NB: there's some extra filtering that happens here in optir, do we need it?
                 while let Some((edge, src)) = walker.next(&self.graph) {
+                    if src == mux {
+                        continue;
+                    }
                     let branch = self.graph.remove_edge(edge).unwrap();
                     self.graph.add_edge(src, mux, branch);
                     self.graph[src].footer.push(Annotation::AssignCond {
                         dst: cond_var.clone(),
-                        cond: preds[&cont],
+                        cond: preds[cont],
                     });
                 }
             }

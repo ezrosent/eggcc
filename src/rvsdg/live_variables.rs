@@ -17,7 +17,7 @@ use petgraph::{
 };
 
 use crate::{
-    cfg::{ret_id, BranchOp, Cfg, Identifier, NodeSet},
+    cfg::{ret_id, BranchOp, Cfg, CondVal, Identifier, NodeSet},
     util::ListDisplay,
 };
 
@@ -41,8 +41,15 @@ pub(crate) fn live_variables(cfg: &Cfg) -> LiveVariableAnalysis {
         // order. First, look at the branches:
 
         for edge in cfg.graph.edges_directed(block, Direction::Outgoing) {
-            if let BranchOp::Cond { arg, .. } = &edge.weight().op {
-                state.gen.insert(names.intern(arg.clone()));
+            if let BranchOp::Cond {
+                arg,
+                val: CondVal { val: _, of },
+            } = &edge.weight().op
+            {
+                if *of > 1 {
+                    state.gen.insert(names.intern(arg.clone()));
+                }
+                // of == 1 is an unconditional jump.
             }
         }
 
@@ -84,7 +91,6 @@ pub(crate) fn live_variables(cfg: &Cfg) -> LiveVariableAnalysis {
                 }
             }
         }
-        // TODO: include branches
         worklist.push(block);
     }
 
@@ -163,7 +169,7 @@ impl VarSet {
         self.vars.set(bit, false);
     }
 
-    fn merge(&mut self, other: &VarSet) -> bool {
+    pub(crate) fn merge(&mut self, other: &VarSet) -> bool {
         if other.vars.is_subset(&self.vars) {
             return false;
         }
@@ -171,7 +177,13 @@ impl VarSet {
         true
     }
 
-    fn render(&self, names: &Names) -> String {
+    pub(crate) fn is_subset(&self, other: &VarSet) -> bool {
+        self.vars.is_subset(&other.vars)
+    }
+
+    /// Pretty-print the contents of the variable set with the un-interned
+    /// identifiers given by `names`.
+    pub(crate) fn render(&self, names: &Names) -> String {
         format!(
             "{}",
             ListDisplay(

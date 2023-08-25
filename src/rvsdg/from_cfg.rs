@@ -109,11 +109,12 @@ impl<'a> RvsdgBuilder<'a> {
         // are the loop inputs.
         let live_vars = self.analysis.var_state(block).unwrap();
 
-        debug_assert_eq!(&live_vars.live_in, &live_vars.live_out);
+        let mut block_params = live_vars.live_in.clone();
+        block_params.merge(&live_vars.live_out);
 
         let mut inputs = Vec::new();
         let pos = self.cfg.graph[block].pos.clone();
-        for (i, input) in live_vars.live_in.iter().enumerate() {
+        for (i, input) in block_params.iter().enumerate() {
             // Record the initial value of the loop variable
             inputs.push(get_op(input, &pos, &self.store, &self.analysis.intern)?);
             // Mark it as an argument to the loop.
@@ -124,7 +125,7 @@ impl<'a> RvsdgBuilder<'a> {
         let tail = if let Some(tail) = loop_tail {
             let mut next = self.try_branch(block)?.unwrap();
             while next != tail {
-                next = self.try_loop(block)?.unwrap();
+                next = self.try_loop(next)?.unwrap();
             }
             tail
         } else {
@@ -134,9 +135,8 @@ impl<'a> RvsdgBuilder<'a> {
 
         self.translate_block(tail)?;
 
-        let live_vars = self.analysis.var_state(block).unwrap();
         let mut outputs = Vec::with_capacity(inputs.len());
-        for input in live_vars.live_in.iter() {
+        for input in block_params.iter() {
             outputs.push(get_op(input, &pos, &self.store, &self.analysis.intern)?);
         }
 
@@ -201,8 +201,7 @@ impl<'a> RvsdgBuilder<'a> {
             },
         );
 
-        let live_vars = self.analysis.var_state(block).unwrap();
-        for (i, var) in live_vars.live_out.iter().enumerate() {
+        for (i, var) in block_params.iter().enumerate() {
             self.store.insert(var, Operand::Project(i, theta_node));
         }
         Ok(self
@@ -250,7 +249,7 @@ impl<'a> RvsdgBuilder<'a> {
         let mut inputs = Vec::<Operand>::new();
         let mut outputs = Vec::<Vec<Operand>>::new();
         let live_vars = self.analysis.var_state(block).unwrap();
-        for var in live_vars.live_out.iter() {
+        for var in live_vars.live_in.iter() {
             inputs.push(get_op(var, &None, &self.store, &self.analysis.intern)?);
         }
 
@@ -258,7 +257,7 @@ impl<'a> RvsdgBuilder<'a> {
         for (_, succ) in succs {
             // First, make sure that all inputs are correctly bound to inputs to the block.
             let live_vars = self.analysis.var_state(block).unwrap();
-            for (i, var) in live_vars.live_out.iter().enumerate() {
+            for (i, var) in live_vars.live_in.iter().enumerate() {
                 self.store.insert(var, Operand::Arg(i));
             }
             // Loop until we reach a join point.
@@ -275,6 +274,8 @@ impl<'a> RvsdgBuilder<'a> {
                     break;
                 }
             }
+
+            eprintln!("maybe found join point at {curr:?} (succ={succ:?})");
 
             let pos = &self.cfg.graph[curr].pos;
 

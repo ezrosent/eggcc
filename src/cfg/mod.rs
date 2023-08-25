@@ -251,6 +251,16 @@ pub(crate) fn to_cfg(func: &Function) -> Cfg {
         }
     }
     builder.finish_block(current, block, anns);
+    if !had_branch {
+        builder.add_edge(
+            current,
+            builder.cfg.exit,
+            Branch {
+                op: BranchOp::Jmp,
+                pos: None,
+            },
+        )
+    }
     builder.build()
 }
 
