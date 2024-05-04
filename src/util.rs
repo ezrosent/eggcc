@@ -837,19 +837,24 @@ impl Run {
                 .unwrap();
         } else {
             let processed = dir.path().join("postprocessed.ll");
-            std::process::Command::new("opt")
-                .arg("-S")
-                .arg("-mem2reg")
-                .arg("-adce")
+            let res = std::process::Command::new("opt")
+                .arg("-disable-verify")
+                .arg("-sroa")
                 .arg("-instsimplify")
                 .arg("-instcombine")
+                .arg("-adce")
+                .arg("-S")
                 .arg(file_path.clone())
                 .arg("-o")
                 .arg(processed.clone())
                 .status()
                 .unwrap();
+            if !res.success() {
+                let p1_string = std::fs::read_to_string(file_path.clone()).unwrap();
+                eprintln!("Opt failed on following input:\n{p1_string}");
+            }
             std::process::Command::new("clang")
-                .arg(file_path.clone())
+                .arg(processed.clone())
                 .arg("-O0")
                 .arg("-o")
                 .arg(executable.clone())
