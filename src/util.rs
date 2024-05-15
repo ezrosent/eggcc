@@ -903,7 +903,6 @@ impl Run {
         } else {
             self.prog_with_args.program.clone()
         };
-
         let mut buf = Vec::new();
         serde_json::to_writer_pretty(&mut buf, &program).expect("failed to deserialize");
         let dir = tempdir().expect("couldn't create temp dir");
@@ -941,6 +940,10 @@ impl Run {
                 .arg(file_path.clone())
                 .arg(output_dir)
                 .status()
+                .unwrap();
+            File::create(format!("{output_dir}/bril-{init_ll_name}.bril"))
+                .unwrap()
+                .write_all(program.to_string().as_bytes())
                 .unwrap();
         }
         if optimize_brillvm {
