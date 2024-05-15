@@ -17,6 +17,8 @@ use crate::cfg::{BasicBlock, Branch, Simple, SimpleCfgFunction, SimpleCfgProgram
 #[cfg(test)]
 use crate::Optimizer;
 
+use super::optimize_constant_branches::optimize_constant_branches;
+
 struct JumpOptimizer<'a> {
     simple_func: &'a SimpleCfgFunction,
 }
@@ -111,12 +113,20 @@ impl SimpleCfgFunction {
     pub fn optimize_jumps(&self) -> Self {
         JumpOptimizer { simple_func: self }.optimized()
     }
+
+    fn optimize_branches(self) -> Self {
+        optimize_constant_branches(self)
+    }
 }
 
 impl SimpleCfgProgram {
     pub fn optimize_jumps(&self) -> Self {
         SimpleCfgProgram {
-            functions: self.functions.iter().map(|f| f.optimize_jumps()).collect(),
+            functions: self
+                .functions
+                .iter()
+                .map(|f| f.optimize_jumps().optimize_branches().optimize_jumps())
+                .collect(),
         }
     }
 }

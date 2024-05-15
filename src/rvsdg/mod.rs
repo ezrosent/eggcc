@@ -31,6 +31,7 @@
 pub(crate) mod from_cfg;
 pub(crate) mod from_dag;
 pub(crate) mod live_variables;
+pub(crate) mod optimize_constant_branches;
 pub(crate) mod optimize_direct_jumps;
 pub(crate) mod restructure;
 pub(crate) mod rvsdg2svg;
