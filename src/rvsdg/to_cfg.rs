@@ -25,7 +25,7 @@ use crate::{
     util::FreshNameGen,
 };
 
-use super::{BasicExpr, Id, Operand, RvsdgBody, RvsdgFunction, RvsdgProgram, RvsdgType};
+use super::{optimize_constant_branches::optimize_constant_branches, BasicExpr, Id, Operand, RvsdgBody, RvsdgFunction, RvsdgProgram, RvsdgType};
 
 /// Represents the result of a RVSDG computation
 #[derive(Clone, Debug)]
